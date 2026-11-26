@@ -21,7 +21,7 @@ Jangan pernah memasukkan `service_role` key ke dalam FE. Operasi sensitif dilaku
 6. Di Supabase **Authentication → URL Configuration**, set **Site URL** ke domain produksi Vercel. Tambahkan domain produksi dan domain preview yang dipakai ke **Redirect URLs** jika nanti memakai alur reset password atau email link.
 7. Jika fitur reset PIN digunakan, set secret `APP_ORIGINS` pada Supabase ke origin FE yang diizinkan, misalnya `https://nama-project.vercel.app`, lalu deploy ulang Edge Function `reset-warga-password`. Untuk domain preview, tambahkan origin preview yang perlu diizinkan, dipisahkan koma.
 
-FE berjalan sebagai static site; Vercel tidak menjalankan backend Fastify/MySQL yang ada. Operasi FE saat ini menuju Supabase Auth/PostgreSQL/RPC, sedangkan reset password warga menggunakan Supabase Edge Function.
+FE berjalan sebagai static site; deploy Vercel **tidak** menerapkan migration atau seed dan tidak menjalankan backend Fastify/MySQL yang ada. Terapkan database terpisah dari root repository dengan perintah di `../supabase/README.md`. Operasi FE saat ini menuju Supabase Auth/PostgreSQL/RPC, sedangkan reset password warga menggunakan Supabase Edge Function.
 
 ## Fitur
 

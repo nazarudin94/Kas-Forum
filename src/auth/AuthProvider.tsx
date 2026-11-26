@@ -10,6 +10,30 @@ function isUserRole(value: string): value is UserRole {
   return userRoles.includes(value as UserRole)
 }
 
+function parseMenuRelation(value: unknown): Pick<MenuPermission, 'key' | 'label' | 'path' | 'sortOrder'> {
+  const relation = Array.isArray(value) ? value[0] : value
+  if (typeof relation !== 'object' || relation === null) {
+    throw new Error('Data menu RBAC tidak valid untuk akun ini.')
+  }
+
+  const menu = relation as Record<string, unknown>
+  if (
+    typeof menu.menu_key !== 'string'
+    || typeof menu.label !== 'string'
+    || typeof menu.path !== 'string'
+    || typeof menu.sort_order !== 'number'
+  ) {
+    throw new Error('Data menu RBAC tidak lengkap untuk akun ini.')
+  }
+
+  return {
+    key: menu.menu_key,
+    label: menu.label,
+    path: menu.path,
+    sortOrder: menu.sort_order,
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
@@ -58,19 +82,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       houseId = Number(warga.house_id)
     }
 
-    const menus: MenuPermission[] = menuRows.map((row) => {
-      const menu = row.menus[0]
-      return {
-        key: menu.menu_key,
-        label: menu.label,
-        path: menu.path,
-        sortOrder: menu.sort_order,
-        canView: row.can_view,
-        canCreate: row.can_create,
-        canUpdate: row.can_update,
-        canDelete: row.can_delete,
-      }
-    })
+    const menus: MenuPermission[] = menuRows.map((row) => ({
+      ...parseMenuRelation(row.menus),
+      canView: row.can_view,
+      canCreate: row.can_create,
+      canUpdate: row.can_update,
+      canDelete: row.can_delete,
+    }))
     const loadedUser: User = {
       id: profile.id,
       username: profile.username,
