@@ -2,13 +2,18 @@ import { getSupabase } from './supabase'
 
 type Row = Record<string, any>
 
-function unwrap<T>(result: { data: T; error: Error | null }): T {
-  if (result.error) throw result.error
+function toError(error: { message?: string } | Error): Error {
+  if (error instanceof Error) return error
+  return new Error(typeof error.message === 'string' && error.message ? error.message : 'Permintaan ke Supabase gagal.')
+}
+
+function unwrap<T>(result: { data: T; error: { message?: string } | Error | null }): T {
+  if (result.error) throw toError(result.error)
   return result.data
 }
 
-function unwrapRows<T>(result: { data: T[] | null; error: Error | null }): T[] {
-  if (result.error) throw result.error
+function unwrapRows<T>(result: { data: T[] | null; error: { message?: string } | Error | null }): T[] {
+  if (result.error) throw toError(result.error)
   if (!result.data) throw new Error('Supabase tidak mengembalikan daftar data.')
   return result.data
 }
@@ -46,6 +51,7 @@ function mapFund(row: Row) {
     description: row.description,
     startDate: row.start_date,
     endDate: row.end_date,
+    dueDay: row.due_day !== null && row.due_day !== undefined ? Number(row.due_day) : null,
     status: row.status,
     createdAt: row.created_at,
   }
@@ -77,11 +83,12 @@ function mapBill(row: Row) {
   return {
     id: Number(row.id),
     fundId: Number(row.fund_id),
-    fundName: row.finance_funds?.name,
-    fundType: row.finance_funds?.type,
+    fundName: row.finance_funds?.name ?? row.fund_name,
+    fundType: row.finance_funds?.type ?? row.fund_type,
     periodKey: row.period_key,
     amountDue: row.amount_due,
     status: row.status,
+    dueDate: row.due_date,
     paidAt: row.paid_at,
     createdAt: row.created_at,
   }
@@ -96,17 +103,79 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     return unwrap(await supabase.rpc('get_public_finance_summary')) as T
   }
 
+  if (path === '/api/public/claimable-houses' && method === 'GET') {
+    const rows = unwrapRows(await supabase.rpc('get_claimable_houses'))
+    return rows.map((row) => ({
+      houseId: Number((row as Row).house_id),
+      houseCode: (row as Row).house_code,
+      blockCode: (row as Row).block_code,
+      houseNumber: (row as Row).house_number,
+      hasAccount: Boolean((row as Row).has_account),
+    })) as T
+  }
+
+  if (path === '/api/public/claim-house' && method === 'POST') {
+    const { data, error } = await supabase.functions.invoke('claim-warga-account', { body })
+    if (error) {
+      let message = error.message
+      if ('context' in error && error.context instanceof Response) {
+        try {
+          const payload: unknown = await error.context.clone().json()
+          if (
+            typeof payload === 'object'
+            && payload !== null
+            && 'message' in payload
+            && typeof payload.message === 'string'
+          ) {
+            message = payload.message
+          }
+        } catch {
+          message = error.message
+        }
+      }
+      throw new Error(message || 'Aktivasi akun warga gagal.')
+    }
+    return data as T
+  }
+
   if ((path === '/api/public/expenses' || path === '/api/ketua/expenses') && method === 'GET') {
     const rows = unwrapRows(await supabase.from('v_public_expenses').select('*').order('expense_date', { ascending: false }))
     return rows.map((row) => mapExpense(row as Row)) as T
   }
 
   if (path === '/api/warga/bills' && method === 'GET') {
-    const rows = unwrapRows(await supabase
+    // Jalankan sync idempoten di latar belakang
+    try {
+      await supabase.rpc('sync_resident_bills')
+    } catch {
+      // Abaikan jika sync belum tersedia, lanjutkan query tabel bills
+    }
+
+    const currentPeriod = new Date().toISOString().slice(0, 7)
+    const { data: rows, error } = await supabase
       .from('bills')
-      .select('id, fund_id, period_key, amount_due, status, paid_at, created_at, finance_funds(name, type)')
-      .order('created_at', { ascending: false }))
-    return rows.map((row) => mapBill(row as Row)) as T
+      .select('id, fund_id, period_key, amount_due, status, due_date, paid_at, created_at, finance_funds!inner(name, type, status)')
+      .eq('finance_funds.status', 'ACTIVE')
+      .lte('period_key', currentPeriod)
+      .order('due_date', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+
+    if (error) throw toError(error)
+    return (rows ?? []).map((row) => mapBill(row as Row)) as T
+  }
+
+  if (path === '/api/warga/profile' && method === 'GET') {
+    return unwrap(await supabase.rpc('get_warga_profile')) as T
+  }
+
+  if (path === '/api/warga/profile' && method === 'PUT') {
+    unwrap(await supabase.rpc('update_warga_profile', {
+      requested_full_name: String(body.fullName ?? ''),
+      requested_head_name: String(body.headName ?? ''),
+      requested_occupancy_status: String(body.occupancyStatus ?? 'OWNER_OCCUPIED'),
+      requested_phone: body.phone ? String(body.phone) : null,
+    }))
+    return { message: 'Profil berhasil diperbarui.' } as T
   }
 
   if (path === '/api/warga/payments' && method === 'GET') {
@@ -158,8 +227,34 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       requested_amount_per_house: Number(body.amountPerHouse),
       requested_description: String(body.description ?? ''),
       requested_start_date: body.startDate ? String(body.startDate) : null,
+      requested_end_date: body.endDate ? String(body.endDate) : null,
+      requested_due_day: body.dueDay !== undefined && body.dueDay !== null && String(body.dueDay) !== '' ? Number(body.dueDay) : 10,
+      requested_status: String(body.status ?? 'ACTIVE'),
     }))
     return { id } as T
+  }
+
+  const fundMatch = path.match(/^\/api\/bendahara\/funds\/(\d+)$/)
+  if (fundMatch && method === 'PUT') {
+    unwrap(await supabase.rpc('update_fund', {
+      requested_fund_id: Number(fundMatch[1]),
+      requested_name: String(body.name),
+      requested_type: String(body.type),
+      requested_amount_per_house: Number(body.amountPerHouse),
+      requested_description: String(body.description ?? ''),
+      requested_start_date: body.startDate ? String(body.startDate) : null,
+      requested_end_date: body.endDate ? String(body.endDate) : null,
+      requested_due_day: body.dueDay !== undefined && body.dueDay !== null && String(body.dueDay) !== '' ? Number(body.dueDay) : 10,
+      requested_status: String(body.status ?? 'ACTIVE'),
+    }))
+    return { message: 'Pos keuangan berhasil diperbarui.' } as T
+  }
+
+  if (fundMatch && method === 'DELETE') {
+    unwrap(await supabase.rpc('delete_fund', {
+      requested_fund_id: Number(fundMatch[1]),
+    }))
+    return { message: 'Pos keuangan berhasil dihapus.' } as T
   }
 
   if (path === '/api/bendahara/bills/generate' && method === 'POST') {
@@ -201,6 +296,22 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     return { id } as T
   }
 
+  if (path === '/api/bendahara/bills/unpaid' && method === 'GET') {
+    const rows = unwrapRows(await supabase.rpc('get_unpaid_bills_for_cash'))
+    return rows.map((row) => ({
+      billId: Number((row as Row).bill_id),
+      houseId: Number((row as Row).house_id),
+      houseCode: (row as Row).house_code,
+      headName: (row as Row).head_name,
+      fundId: Number((row as Row).fund_id),
+      fundName: (row as Row).fund_name,
+      fundType: (row as Row).fund_type,
+      periodKey: (row as Row).period_key,
+      amountDue: (row as Row).amount_due,
+      dueDate: (row as Row).due_date ?? null,
+    })) as T
+  }
+
   if (path === '/api/bendahara/payments/cash' && method === 'POST') {
     unwrap(await supabase.rpc('record_cash_payment', {
       requested_bill_id: Number(body.billId),
@@ -222,7 +333,15 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     return rows.map((row) => ({
       houseId: Number(row.house_id),
       houseCode: row.house_code,
+      blockCode: row.block_code,
+      houseNumber: row.house_number,
       headName: row.head_name,
+      occupancyStatus: row.occupancy_status ?? 'OWNER_OCCUPIED',
+      isActive: row.is_active,
+      phoneMasked: row.phone_masked ?? null,
+      phone: row.phone ?? null,
+      claimCode: row.claim_code ?? null,
+      hasAccount: Boolean(row.has_account),
       outstandingBillCount: Number(row.outstanding_bill_count),
       outstandingAmount: row.outstanding_amount,
     })) as T
@@ -231,6 +350,44 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   if (path === '/api/ketua/verification-log' && method === 'GET') {
     const rows = unwrapRows(await supabase.from('v_verification_log').select('*').order('verified_at', { ascending: false }))
     return rows.map((row) => mapPayment(row as Row)) as T
+  }
+
+  if (path === '/api/ronda/schedules' && method === 'GET') {
+    const rows = unwrapRows(await supabase.from('v_ronda_schedules').select('*').order('sort_order').order('house_code'))
+    return rows.map((row) => ({
+      id: Number(row.id),
+      dayKey: row.day_key,
+      dayLabel: row.day_label,
+      houseId: Number(row.house_id),
+      houseCode: row.house_code,
+      blockCode: row.block_code,
+      houseNumber: row.house_number,
+      houseIsActive: Boolean(row.house_is_active),
+      headName: row.head_name ?? null,
+      phoneMasked: row.phone_masked ?? null,
+      phone: row.phone ?? null,
+      notes: row.notes ?? null,
+      createdAt: row.created_at,
+      sortOrder: Number(row.sort_order),
+    })) as T
+  }
+
+  if (path === '/api/ronda/schedules' && method === 'POST') {
+    const newId = unwrap(await supabase.rpc('save_ronda_entry', {
+      requested_id: body.id ? Number(body.id) : null,
+      requested_day_key: String(body.dayKey),
+      requested_house_id: Number(body.houseId),
+      requested_notes: typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim() : null,
+    }))
+    return { id: Number(newId), message: 'Jadwal ronda berhasil disimpan.' } as T
+  }
+
+  const deleteRondaMatch = path.match(/^\/api\/ronda\/schedules\/(\d+)$/)
+  if (deleteRondaMatch && method === 'DELETE') {
+    unwrap(await supabase.rpc('delete_ronda_entry', {
+      requested_id: Number(deleteRondaMatch[1]),
+    }))
+    return { message: 'Jadwal ronda berhasil dihapus.' } as T
   }
 
   throw new Error(`Operasi Supabase belum didukung: ${method} ${path}`)

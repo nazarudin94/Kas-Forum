@@ -1,5 +1,6 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
 import { AlertCircle, CheckCircle2, Clock3, CircleDollarSign } from 'lucide-react'
+import { formatNominalInput } from '../lib/format'
 import type { BillStatus, PaymentStatus } from '../types'
 
 type Status = BillStatus | PaymentStatus | 'APPROVED'
@@ -94,4 +95,26 @@ export function EmptyState({
 
 export function LoadingState({ label = 'Memuat data...' }: { label?: string }) {
   return <div className="loading-state"><span className="spinner" />{label}</div>
+}
+
+export function MoneyInput({
+  value,
+  onValueChange,
+  placeholder = 'Contoh: 50.000',
+  ...props
+}: Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange'> & {
+  value: string
+  onValueChange: (formattedValue: string) => void
+}) {
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      autoComplete="off"
+      placeholder={placeholder}
+      value={value}
+      onChange={(event) => onValueChange(formatNominalInput(event.target.value))}
+      {...props}
+    />
+  )
 }

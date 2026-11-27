@@ -6,8 +6,25 @@ const currencyFormatter = new Intl.NumberFormat('id-ID', {
   maximumFractionDigits: 0,
 })
 
+const thousandFormatter = new Intl.NumberFormat('id-ID', {
+  maximumFractionDigits: 0,
+})
+
 export function formatCurrency(value: MoneyValue | bigint): string {
   return currencyFormatter.format(typeof value === 'bigint' ? value : BigInt(value))
+}
+
+export function formatNominalInput(value: MoneyValue): string {
+  const digits = String(value).replace(/\D/g, '').slice(0, 15)
+  if (!digits) return ''
+  const normalized = digits.replace(/^0+(?=\d)/, '')
+  return thousandFormatter.format(BigInt(normalized))
+}
+
+export function parseNominalInput(value: string): number {
+  const digits = value.replace(/\D/g, '')
+  if (!digits) return Number.NaN
+  return Number(digits)
 }
 
 export function formatDate(value: string | null | undefined): string {

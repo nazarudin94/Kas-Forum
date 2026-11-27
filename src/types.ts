@@ -1,13 +1,34 @@
-export type UserRole = 'WARGA' | 'BENDAHARA' | 'KETUA'
+export type BuiltInUserRole = 'WARGA' | 'BENDAHARA' | 'KETUA' | 'SEKRETARIS' | 'ADMIN'
+export type UserRole = BuiltInUserRole | (string & {})
 export type MoneyValue = string | number
 export type PaymentStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
 export type BillStatus = 'UNPAID' | 'PENDING' | 'PAID'
+
+export type RondaDayKey = 'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU' | 'MINGGU'
+
+export interface RondaSchedule {
+  id: number
+  dayKey: RondaDayKey
+  dayLabel: string
+  houseId: number
+  houseCode: string
+  blockCode: string
+  houseNumber: string
+  houseIsActive: boolean
+  headName: string | null
+  phoneMasked?: string | null
+  phone?: string | null
+  notes: string | null
+  createdAt: string
+  sortOrder: number
+}
 
 export interface User {
   id: string
   username: string
   fullName: string
   role: UserRole
+  roleName: string
   houseId: number | null
   mustChangePassword: boolean
   menus: MenuPermission[]
@@ -49,6 +70,7 @@ export interface Bill {
   periodKey: string
   amountDue: MoneyValue
   status: BillStatus
+  dueDate?: string | null
   paidAt: string | null
   createdAt: string
 }
@@ -81,6 +103,7 @@ export interface FinanceFund {
   description: string | null
   startDate: string | null
   endDate: string | null
+  dueDay?: number | null
   status: 'ACTIVE' | 'CLOSED'
   createdAt: string
 }
@@ -98,10 +121,54 @@ export interface Expense {
   createdAt: string
 }
 
+export type HouseOccupancyStatus = 'OWNER_OCCUPIED' | 'RENTED'
+
 export interface HouseArrears {
   houseId: number
   houseCode: string
+  blockCode: string
+  houseNumber: string
   headName: string
+  occupancyStatus: HouseOccupancyStatus
+  isActive: boolean
+  phoneMasked?: string | null
+  phone?: string | null
+  claimCode?: string | null
+  hasAccount?: boolean
   outstandingBillCount: number
   outstandingAmount: MoneyValue
+}
+
+export interface ClaimableHouse {
+  houseId: number
+  houseCode: string
+  blockCode: string
+  houseNumber: string
+  hasAccount: boolean
+}
+
+export interface UnpaidHouseBill {
+  billId: number
+  houseId: number
+  houseCode: string
+  headName: string
+  fundId: number
+  fundName: string
+  fundType: 'RECURRING' | 'EVENT'
+  periodKey: string
+  amountDue: MoneyValue
+  dueDate: string | null
+}
+
+export interface WargaProfile {
+  username: string
+  fullName: string
+  houseCode: string
+  blockCode: string
+  houseNumber: string
+  headName: string
+  occupancyStatus: HouseOccupancyStatus
+  phone: string | null
+  phoneMasked?: string | null
+  createdAt: string
 }

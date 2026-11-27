@@ -5,14 +5,17 @@ import {
   Bell,
   BookOpenCheck,
   Boxes,
+  CalendarCheck,
   ClipboardList,
   FileCheck2,
   HandCoins,
   LayoutDashboard,
+  KeyRound,
   Leaf,
   LogOut,
   ReceiptText,
   ShieldCheck,
+  UserRound,
   UsersRound,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -21,22 +24,29 @@ import { useAuth } from '../auth/AuthContext'
 import { Button, Card, LoadingState, Notice, SectionTitle } from '../components/UI'
 import { formatCurrency } from '../lib/format'
 import { useResource } from '../hooks/useResource'
-import type { FinanceSummary, UserRole } from '../types'
+import type { Bill, FinanceSummary, Payment, User, UserRole } from '../types'
 import {
   BendaharaWorkspace,
   KetuaWorkspace,
+  RondaPanel,
+  WargaRondaInfoCard,
   WargaWorkspace,
 } from './dashboard/WorkspacePanels'
+import { RbacManagementPanel } from './dashboard/RbacManagementPanel'
 
 type DashboardTab =
   | 'overview'
   | 'bills'
   | 'expenses'
+  | 'profile'
   | 'review'
   | 'funds'
   | 'income'
   | 'arrears'
   | 'verification'
+  | 'ronda'
+  | 'rbac'
+  | 'role_menu'
 
 interface NavItem {
   id: DashboardTab
@@ -44,7 +54,7 @@ interface NavItem {
   icon: LucideIcon
 }
 
-const roleDetails: Record<UserRole, { label: string; subtitle: string; nav: NavItem[] }> = {
+const roleDetails: Partial<Record<UserRole, { label: string; subtitle: string; nav: NavItem[] }>> = {
   WARGA: {
     label: 'Warga',
     subtitle: 'Pantau iuran dan aktivitas kas lingkungan.',
@@ -52,6 +62,7 @@ const roleDetails: Record<UserRole, { label: string; subtitle: string; nav: NavI
       { id: 'overview', label: 'Ringkasan', icon: LayoutDashboard },
       { id: 'bills', label: 'Tagihan saya', icon: ReceiptText },
       { id: 'expenses', label: 'Pengeluaran', icon: ClipboardList },
+      { id: 'profile', label: 'Profil saya', icon: UserRound },
     ],
   },
   BENDAHARA: {
@@ -63,6 +74,7 @@ const roleDetails: Record<UserRole, { label: string; subtitle: string; nav: NavI
       { id: 'funds', label: 'Pos & tagihan', icon: Boxes },
       { id: 'expenses', label: 'Pengeluaran', icon: ClipboardList },
       { id: 'income', label: 'Pemasukan', icon: HandCoins },
+      { id: 'ronda', label: 'Jadwal Ronda', icon: CalendarCheck },
     ],
   },
   KETUA: {
@@ -72,9 +84,64 @@ const roleDetails: Record<UserRole, { label: string; subtitle: string; nav: NavI
       { id: 'overview', label: 'Ringkasan', icon: LayoutDashboard },
       { id: 'arrears', label: 'Rekap rumah', icon: UsersRound },
       { id: 'expenses', label: 'Pengeluaran', icon: ClipboardList },
+      { id: 'ronda', label: 'Jadwal Ronda', icon: CalendarCheck },
       { id: 'verification', label: 'Log verifikasi', icon: BookOpenCheck },
     ],
   },
+  SEKRETARIS: {
+    label: 'Sekretaris',
+    subtitle: 'Kelola jadwal ronda dan administrasi warga.',
+    nav: [
+      { id: 'overview', label: 'Ringkasan', icon: LayoutDashboard },
+      { id: 'ronda', label: 'Jadwal Ronda', icon: CalendarCheck },
+      { id: 'arrears', label: 'Rekap rumah', icon: UsersRound },
+      { id: 'expenses', label: 'Pengeluaran', icon: ClipboardList },
+    ],
+  },
+  ADMIN: {
+    label: 'Administrator',
+    subtitle: 'Kelola akun pengguna dan hak akses.',
+    nav: [
+      { id: 'rbac', label: 'Manajemen RBAC', icon: KeyRound },
+      { id: 'role_menu', label: 'Role Menu', icon: ShieldCheck },
+    ],
+  },
+}
+
+const menuIcons: Record<DashboardTab, LucideIcon> = {
+  overview: LayoutDashboard,
+  bills: ReceiptText,
+  expenses: ClipboardList,
+  profile: UserRound,
+  review: FileCheck2,
+  funds: Boxes,
+  income: HandCoins,
+  arrears: UsersRound,
+  verification: BookOpenCheck,
+  ronda: CalendarCheck,
+  rbac: KeyRound,
+  role_menu: ShieldCheck,
+}
+
+function isDashboardTab(value: string): value is DashboardTab {
+  return Object.prototype.hasOwnProperty.call(menuIcons, value)
+}
+
+function isBendaharaTab(tab: DashboardTab): tab is 'review' | 'funds' | 'expenses' | 'income' {
+  return tab === 'review' || tab === 'funds' || tab === 'expenses' || tab === 'income'
+}
+
+function isKetuaTab(tab: DashboardTab): tab is 'arrears' | 'verification' {
+  return tab === 'arrears' || tab === 'verification'
+}
+
+function initialDashboardTab(user: User | null): DashboardTab {
+  if (user?.role === 'ADMIN') return 'rbac'
+  if (user && !roleDetails[user.role]) {
+    const assignedTab = user.menus.flatMap((menu) => isDashboardTab(menu.key) ? [menu.key] : [])[0]
+    return assignedTab ?? 'overview'
+  }
+  return 'overview'
 }
 
 function SummaryCards({ summary }: { summary: FinanceSummary }) {
@@ -97,19 +164,23 @@ function SummaryCards({ summary }: { summary: FinanceSummary }) {
   )
 }
 
-function FundHighlights({ summary }: { summary: FinanceSummary }) {
+function FundHighlights({ summary, onlyActive = false }: { summary: FinanceSummary; onlyActive?: boolean }) {
+  const visibleFunds = onlyActive
+    ? summary.funds.filter((fund) => fund.fund_status === 'ACTIVE')
+    : summary.funds
+
   return (
     <Card>
       <SectionTitle
         title="Pos keuangan"
         description="Ringkasan saldo per pos kas."
-        action={<span className="tiny-count">{summary.funds.length} pos</span>}
+        action={<span className="tiny-count">{visibleFunds.length} pos</span>}
       />
-      {summary.funds.length === 0 ? (
+      {visibleFunds.length === 0 ? (
         <div className="empty-inline">Belum ada pos keuangan.</div>
       ) : (
         <div className="fund-grid">
-          {summary.funds.map((fund) => (
+          {visibleFunds.map((fund) => (
             <div className="fund-tile" key={fund.fund_id}>
               <span className={`fund-icon ${fund.fund_type === 'EVENT' ? 'fund-event' : ''}`}>
                 {fund.fund_type === 'EVENT' ? <Leaf size={17} /> : <Banknote size={17} />}
@@ -149,9 +220,8 @@ function DashboardOverview({
           <p>{description}</p>
         </div>
       </div>
-      <FundHighlights summary={summary} />
-      {role === 'WARGA' && <WargaWorkspace tab="overview" />}
-      {role === 'BENDAHARA' && <BendaharaWorkspace tab="overview" />}
+      {role === 'WARGA' && <WargaRondaInfoCard />}
+      <FundHighlights summary={summary} onlyActive={role === 'WARGA'} />
       {role === 'KETUA' && <KetuaWorkspace tab="overview" />}
     </div>
   )
@@ -163,24 +233,72 @@ export function DashboardPage() {
   const [today] = useState(
     () => new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' }).format(new Date()),
   )
-  const [activeTab, setActiveTab] = useState<DashboardTab>('overview')
+  const [activeTab, setActiveTab] = useState<DashboardTab>(() => initialDashboardTab(user))
   const [logoutError, setLogoutError] = useState<string | null>(null)
   const role = user?.role ?? 'WARGA'
-  const details = roleDetails[role]
-  const visibleNav = details.nav.flatMap((item) => {
+  const details = roleDetails[role] ?? {
+    label: user?.roleName ?? role,
+    subtitle: 'Akses berdasarkan menu yang diberikan administrator.',
+    nav: user?.menus.flatMap((menu) => isDashboardTab(menu.key)
+      ? [{ id: menu.key, label: menu.label, icon: menuIcons[menu.key] }]
+      : []) ?? [],
+  }
+  const canViewOverview = Boolean(user?.menus.some((menu) => menu.key === 'overview' && menu.canView))
+  const canViewReview = Boolean(user?.menus.some((menu) => menu.key === 'review' && menu.canView))
+  const canViewBills = Boolean(user?.menus.some((menu) => menu.key === 'bills' && menu.canView))
+  const isCustomRole = !roleDetails[role]
+  const configuredNav = details.nav.flatMap((item) => {
     const menu = user?.menus.find((entry) => entry.key === item.id && entry.canView)
     return menu ? [{ ...item, label: menu.label }] : []
   })
+  const configuredKeys = new Set(details.nav.map((item) => item.id))
+  const extraNav = (user?.menus ?? [])
+    .filter((menu) => menu.canView && isDashboardTab(menu.key) && !configuredKeys.has(menu.key as DashboardTab))
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((menu) => ({
+      id: menu.key as DashboardTab,
+      label: menu.label,
+      icon: menuIcons[menu.key as DashboardTab] ?? LayoutDashboard,
+    }))
+  const visibleNav = [...configuredNav, ...extraNav]
   const {
     data: summary,
     loading: summaryLoading,
     error: summaryError,
     reload: reloadSummary,
-  } = useResource<FinanceSummary>('/api/public/summary')
+  } = useResource<FinanceSummary>(
+    role !== 'ADMIN' && canViewOverview ? '/api/public/summary' : null,
+  )
+  const {
+    data: pendingReviews,
+    reload: reloadPendingReviews,
+  } = useResource<Payment[]>(
+    canViewReview ? '/api/bendahara/payments/pending' : null,
+  )
+  const {
+    data: residentBills,
+    reload: reloadResidentBills,
+  } = useResource<Bill[]>(
+    canViewBills ? '/api/warga/bills' : null,
+  )
+  const pendingReviewCount = pendingReviews?.length ?? 0
+  const unpaidBillCount = residentBills?.filter((bill) => bill.status === 'UNPAID').length ?? 0
+
+  function badgeCountForTab(tab: DashboardTab): number {
+    if (tab === 'review') return pendingReviewCount
+    if (tab === 'bills') return unpaidBillCount
+    return 0
+  }
 
   const refreshFinance = useCallback(async () => {
-    await reloadSummary()
-  }, [reloadSummary])
+    await Promise.all([reloadSummary(), reloadPendingReviews(), reloadResidentBills()])
+  }, [reloadSummary, reloadPendingReviews, reloadResidentBills])
+
+  function handleTabChange(tab: DashboardTab) {
+    setActiveTab(tab)
+    if (canViewReview) void reloadPendingReviews()
+    if (canViewBills) void reloadResidentBills()
+  }
 
   async function handleLogout() {
     setLogoutError(null)
@@ -229,7 +347,8 @@ export function DashboardPage() {
                 key={item.id}
                 item={item}
                 active={activeTab === item.id}
-                onClick={() => setActiveTab(item.id)}
+                badgeCount={badgeCountForTab(item.id)}
+                onClick={() => handleTabChange(item.id)}
               />
             ))}
           </nav>
@@ -246,16 +365,21 @@ export function DashboardPage() {
                 key={item.id}
                 item={item}
                 active={activeTab === item.id}
-                onClick={() => setActiveTab(item.id)}
+                badgeCount={badgeCountForTab(item.id)}
+                onClick={() => handleTabChange(item.id)}
               />
             ))}
           </div>
 
           <div className="page-heading">
             <div>
-              <span className="eyebrow">KAS BLOK · {details.label.toUpperCase()}</span>
+              <span className="eyebrow">{details.label.toUpperCase()}</span>
               <h1>{pageTitle}</h1>
-              <p>{activeTab === 'overview' ? `Halo, ${user?.fullName}. Berikut kondisi kas terbaru.` : details.subtitle}</p>
+              <p>
+                {activeTab === 'overview' && role !== 'ADMIN'
+                  ? `Halo, ${user?.fullName}. Berikut kondisi kas terbaru.`
+                  : details.subtitle}
+              </p>
             </div>
             <span className="today-label">
               <span className="live-dot" />
@@ -264,20 +388,37 @@ export function DashboardPage() {
           </div>
 
           {logoutError && <Notice>{logoutError}</Notice>}
-          {summaryError && <Notice>{summaryError}</Notice>}
-          {summaryLoading && !summary && <LoadingState label="Memuat ringkasan kas..." />}
-          {summary && <SummaryCards summary={summary} />}
+          {visibleNav.length === 0 && (
+            <Notice variant="info">Role ini belum memiliki menu. Hubungi ADMIN untuk mengatur permission.</Notice>
+          )}
+          {role !== 'ADMIN' && summaryError && <Notice>{summaryError}</Notice>}
+          {canViewOverview && activeTab !== 'profile' && summaryLoading && !summary && (
+            <LoadingState label="Memuat ringkasan kas..." />
+          )}
+          {canViewOverview && activeTab !== 'profile' && summary && <SummaryCards summary={summary} />}
 
-          {summary && activeTab === 'overview' && <DashboardOverview role={role} summary={summary} />}
-          {role === 'WARGA' && activeTab !== 'overview' && (
+          {canViewOverview && summary && activeTab === 'overview' && (
+            <DashboardOverview role={role} summary={summary} />
+          )}
+          {role === 'WARGA' && activeTab !== 'overview' && activeTab !== 'ronda' && activeTab !== 'rbac' && activeTab !== 'role_menu' && (
             <WargaWorkspace tab={activeTab} onFinanceChange={refreshFinance} />
           )}
-          {role === 'BENDAHARA' && activeTab !== 'overview' && (
+          {activeTab === 'ronda' && <RondaPanel readonly={role === 'WARGA'} />}
+          {role === 'BENDAHARA' && activeTab !== 'overview' && activeTab !== 'ronda' && activeTab !== 'rbac' && activeTab !== 'role_menu' && (
             <BendaharaWorkspace tab={activeTab} onFinanceChange={refreshFinance} />
           )}
-          {role === 'KETUA' && activeTab !== 'overview' && (
+          {role === 'KETUA' && activeTab !== 'overview' && activeTab !== 'ronda' && activeTab !== 'rbac' && activeTab !== 'role_menu' && (
             <KetuaWorkspace tab={activeTab} />
           )}
+          {role === 'SEKRETARIS' && activeTab !== 'overview' && activeTab !== 'ronda' && activeTab !== 'rbac' && activeTab !== 'role_menu' && (
+            <KetuaWorkspace tab={activeTab} />
+          )}
+          {isCustomRole && activeTab !== 'ronda' && isBendaharaTab(activeTab) && (
+            <BendaharaWorkspace tab={activeTab} onFinanceChange={refreshFinance} />
+          )}
+          {isCustomRole && activeTab !== 'ronda' && isKetuaTab(activeTab) && <KetuaWorkspace tab={activeTab} />}
+          {role === 'ADMIN' && activeTab === 'rbac' && <RbacManagementPanel section="users" />}
+          {role === 'ADMIN' && activeTab === 'role_menu' && <RbacManagementPanel section="role-menu" />}
         </main>
       </div>
     </div>
@@ -287,10 +428,12 @@ export function DashboardPage() {
 function NavButton({
   item,
   active,
+  badgeCount = 0,
   onClick,
 }: {
   item: NavItem
   active: boolean
+  badgeCount?: number
   onClick: () => void
 }) {
   const Icon = item.icon
@@ -303,6 +446,11 @@ function NavButton({
     >
       <Icon size={18} />
       <span>{item.label}</span>
+      {badgeCount > 0 && (
+        <span className="nav-badge" aria-label={`${badgeCount} item pada ${item.label}`}>
+          {badgeCount}
+        </span>
+      )}
     </button>
   )
 }

@@ -4,10 +4,8 @@ import { AuthContext } from './AuthContext'
 import { getSupabase, usernameToAuthEmail } from '../lib/supabase'
 import type { MenuPermission, User, UserRole } from '../types'
 
-const userRoles: UserRole[] = ['WARGA', 'BENDAHARA', 'KETUA']
-
 function isUserRole(value: string): value is UserRole {
-  return userRoles.includes(value as UserRole)
+  return value.trim().length > 0
 }
 
 function parseMenuRelation(value: unknown): Pick<MenuPermission, 'key' | 'label' | 'path' | 'sortOrder'> {
@@ -60,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const [{ data: role, error: roleError }, { data: menuRows, error: menuError }] = await Promise.all([
-      supabase.from('roles').select('role_key').eq('id', profile.role_id).single(),
+      supabase.from('roles').select('role_key, name').eq('id', profile.role_id).single(),
       supabase
         .from('role_menus')
         .select('can_view, can_create, can_update, can_delete, menus!inner(menu_key, label, path, sort_order)')
@@ -94,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       username: profile.username,
       fullName: profile.full_name,
       role: role.role_key,
+      roleName: role.name,
       houseId,
       mustChangePassword: profile.must_change_password,
       menus,

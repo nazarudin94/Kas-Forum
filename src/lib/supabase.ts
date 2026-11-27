@@ -9,7 +9,16 @@ export function getSupabase() {
   if (!url || !key) {
     throw new Error('Konfigurasi Supabase belum lengkap. Isi VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY.')
   }
-  if (!client) client = createClient(url, key)
+  if (!client) {
+    client = createClient(url, key, {
+      auth: {
+        flowType: 'pkce',
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+      },
+    })
+  }
   return client
 }
 
