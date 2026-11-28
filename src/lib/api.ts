@@ -443,6 +443,18 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     return { message: 'Status verifikasi berkas administrasi berhasil diperbarui.' } as T
   }
 
+  if (path === '/api/sekretaris/warga/delete' && method === 'POST') {
+    const result = unwrap(await supabase.rpc('delete_warga_record', {
+      requested_house_id: Number(body.houseId),
+      requested_delete_house: Boolean(body.deleteHouse),
+    })) as { message?: string; claimCode?: string | null; houseCode?: string }
+    return {
+      message: result?.message ?? 'Data warga berhasil dihapus.',
+      claimCode: result?.claimCode ?? null,
+      houseCode: result?.houseCode ?? null,
+    } as T
+  }
+
   if (path === '/api/ketua/verification-log' && method === 'GET') {
     const rows = unwrapRows(await supabase.from('v_verification_log').select('*').order('verified_at', { ascending: false }))
     return rows.map((row) => mapPayment(row as Row)) as T

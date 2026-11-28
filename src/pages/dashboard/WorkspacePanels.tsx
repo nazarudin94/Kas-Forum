@@ -1452,7 +1452,9 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
   const [selectedOccupancy, setSelectedOccupancy] = useState<string>('ALL')
   const [selectedDocFilter, setSelectedDocFilter] = useState<string>('ALL')
   const [verifyingHouse, setVerifyingHouse] = useState<HouseArrears | null>(null)
+  const [deletingHouse, setDeletingHouse] = useState<HouseArrears | null>(null)
   const verifyDocsDialog = useRef<HTMLDialogElement>(null)
+  const deleteWargaDialog = useRef<HTMLDialogElement>(null)
 
   const rows = resource.data ?? []
 
@@ -1485,9 +1487,10 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
 
   const visibleRows = compact ? filteredRows.slice(0, 5) : filteredRows
   const permission = user?.menus.find((menu) => menu.key === 'arrears')
-  const canCreate = !compact && Boolean(permission?.canCreate)
-  const canUpdate = !compact && Boolean(permission?.canUpdate)
-  const canDelete = !compact && Boolean(permission?.canDelete)
+  const isManagerRole = user?.role === 'SEKRETARIS' || user?.role === 'KETUA' || user?.role === 'ADMIN'
+  const canCreate = !compact && Boolean(permission?.canCreate || isManagerRole)
+  const canUpdate = !compact && Boolean(permission?.canUpdate || isManagerRole)
+  const canDelete = !compact && Boolean(permission?.canDelete || isManagerRole)
 
   function openHouseForm(house: HouseArrears | null = null) {
     setEditingHouse(house)
@@ -1928,6 +1931,22 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
                       <Power size={14} /> Aktifkan
                     </Button>
                   )}
+                  {canDelete && (
+                    <Button
+                      type="button"
+                      variant="danger"
+                      className="button-small"
+                      onClick={() => {
+                        setDeletingHouse(row)
+                        deleteWargaDialog.current?.showModal()
+                      }}
+                      aria-label={`Hapus warga ${row.houseCode}`}
+                      disabled={updatingHouseId !== null}
+                      title="Hapus data warga penghuni atau hapus beserta rumah"
+                    >
+                      <Trash2 size={14} /> Hapus warga
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
@@ -1996,6 +2015,42 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
             onCancel={() => {
               verifyDocsDialog.current?.close()
               setVerifyingHouse(null)
+            }}
+          />
+        )}
+      </dialog>
+      <dialog className="rbac-modal" ref={deleteWargaDialog} aria-labelledby="delete-warga-title">
+        <div className="rbac-modal-head">
+          <div>
+            <h2 id="delete-warga-title">Hapus Data Warga</h2>
+            <p>Pilih apakah hanya mengosongkan penghuni rumah atau menghapus beserta nomor rumah.</p>
+          </div>
+          <button
+            className="rbac-modal-close"
+            type="button"
+            aria-label="Tutup konfirmasi hapus warga"
+            onClick={() => {
+              deleteWargaDialog.current?.close()
+              setDeletingHouse(null)
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        {deletingHouse && (
+          <DeleteWargaForm
+            key={deletingHouse.houseId}
+            house={deletingHouse}
+            onDeleted={async (message) => {
+              deleteWargaDialog.current?.close()
+              setDeletingHouse(null)
+              setActionSuccess(message)
+              setActionError(null)
+              await resource.reload()
+            }}
+            onCancel={() => {
+              deleteWargaDialog.current?.close()
+              setDeletingHouse(null)
             }}
           />
         )}
@@ -2257,6 +2312,124 @@ function VerifyDocsForm({
       <div className="form-actions">
         <Button className="button-small" type="submit" disabled={submitting}>
           {submitting ? 'Menyimpan...' : 'Simpan Verifikasi Berkas'}
+        </Button>
+        <Button className="button-small" type="button" variant="secondary" onClick={onCancel} disabled={submitting}>
+          Batal
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function DeleteWargaForm({
+  house,
+  onDeleted,
+  onCancel,
+}: {
+  house: HouseArrears
+  onDeleted: (message: string) => Promise<void>
+  onCancel: () => void
+}) {
+  const [deleteHouse, setDeleteHouse] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError(null)
+    setSubmitting(true)
+    try {
+      const response = await api<{ message: string }>('/api/sekretaris/warga/delete', {
+        method: 'POST',
+        body: jsonBody({
+          houseId: house.houseId,
+          deleteHouse,
+        }),
+      })
+      await onDeleted(response.message)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Gagal menghapus data warga.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <form className="rbac-create-form" onSubmit={(event) => void submit(event)}>
+      {error && <Notice>{error}</Notice>}
+
+      <div style={{ marginBottom: '14px', padding: '10px 12px', background: '#f8faf9', borderRadius: '8px', border: '1px solid #e2e8e4' }}>
+        <div style={{ fontWeight: 600, fontSize: '14px', color: '#163326' }}>
+          {house.houseCode} · {house.headName}
+        </div>
+        <div style={{ fontSize: '12px', color: '#687e72', marginTop: '2px' }}>
+          Blok {house.blockCode} No. {house.houseNumber} · {house.hasAccount ? 'Akun Warga Aktif' : 'Belum Aktif'}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '10px',
+            cursor: 'pointer',
+            padding: '10px 12px',
+            border: !deleteHouse ? '1.5px solid #1b4332' : '1px solid #d1ded7',
+            borderRadius: '8px',
+            background: !deleteHouse ? '#f0fdf4' : '#ffffff',
+          }}
+        >
+          <input
+            type="radio"
+            name="deleteMode"
+            checked={!deleteHouse}
+            onChange={() => setDeleteHouse(false)}
+            style={{ marginTop: '3px', accentColor: '#1b4332', cursor: 'pointer' }}
+          />
+          <div>
+            <strong style={{ display: 'block', fontSize: '13px', color: '#163326' }}>
+              Hapus Data Warga &amp; Reset Aktivasi (Rumah Tetap Ada)
+            </strong>
+            <span style={{ fontSize: '12px', color: '#687e72' }}>
+              Menghapus akun login warga, nomor telepon, dan status berkas KTP/KK. Nomor rumah <b>{house.houseCode}</b> tetap tersimpan (menjadi <i>Belum dihuni</i>) dan <b>otomatis dibuatkan kode klaim baru</b> agar bisa diaktivasi ulang.
+            </span>
+          </div>
+        </label>
+
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '10px',
+            cursor: 'pointer',
+            padding: '10px 12px',
+            border: deleteHouse ? '1.5px solid #dc2626' : '1px solid #d1ded7',
+            borderRadius: '8px',
+            background: deleteHouse ? '#fef2f2' : '#ffffff',
+          }}
+        >
+          <input
+            type="radio"
+            name="deleteMode"
+            checked={deleteHouse}
+            onChange={() => setDeleteHouse(true)}
+            style={{ marginTop: '3px', accentColor: '#dc2626', cursor: 'pointer' }}
+          />
+          <div>
+            <strong style={{ display: 'block', fontSize: '13px', color: '#991b1b' }}>
+              Hapus Permanen Warga Beserta Nomor Rumah
+            </strong>
+            <span style={{ fontSize: '12px', color: '#7f1d1d' }}>
+              Menghapus akun warga, jadwal ronda, tagihan yang belum dibayar, beserta nomor rumah <b>{house.houseCode}</b> dari daftar rumah (gunakan jika salah input nomor rumah).
+            </span>
+          </div>
+        </label>
+      </div>
+
+      <div className="form-actions">
+        <Button className="button-small" type="submit" variant="danger" disabled={submitting}>
+          <Trash2 size={14} /> {submitting ? 'Menghapus...' : deleteHouse ? 'Hapus Warga & Rumah' : 'Hapus Data Warga'}
         </Button>
         <Button className="button-small" type="button" variant="secondary" onClick={onCancel} disabled={submitting}>
           Batal
