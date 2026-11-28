@@ -1,11 +1,33 @@
-import type { Expense, FinanceSummary, HouseArrears, RondaSchedule } from '../types'
+import { Capacitor } from '@capacitor/core'
+import type { Expense, FinanceSummary, HouseArrears, RondaSchedule, User } from '../types'
 import { formatCurrency, formatDate } from './format'
 
+interface KasKitaAndroidPrintBridge {
+  printHtml?: (title: string, html: string) => void
+  shareCsv?: (filename: string, csvContent: string) => void
+}
+
+declare global {
+  interface Window {
+    KasKitaAndroidPrint?: KasKitaAndroidPrintBridge
+  }
+}
+
 /**
- * Mengonversi array baris data menjadi file CSV dan mengunduhnya ke komputer pengguna.
- * Dilengkapi dengan UTF-8 BOM (\uFEFF) agar terbaca sempurna di Microsoft Excel (Windows/Mac).
+ * Mengecek apakah pengguna saat ini memiliki hak akses RBAC untuk mengunduh laporan (PDF / CSV).
+ * Dikontrol oleh Administrator melalui menu Role Menu pada item 'export'.
+ */
+export function canExportDocuments(user: User | null | undefined): boolean {
+  return Boolean(user?.menus.some((menu) => menu.key === 'export' && menu.canView))
+}
+
+/**
+ * Mengonversi array baris data menjadi file CSV dan mengunduhnya ke perangkat pengguna.
+ * Dilengkapi UTF-8 BOM (\uFEFF) agar terbaca rapi di Microsoft Excel, serta dukungan
+ * Native Share pada Android APK / perangkat mobile.
  */
 export function downloadCsv(filename: string, rows: (string | number | boolean | null | undefined)[][]): void {
+  const safeFilename = filename.endsWith('.csv') ? filename : `${filename}.csv`
   const csvContent = rows
     .map((row) =>
       row
@@ -18,33 +40,57 @@ export function downloadCsv(filename: string, rows: (string | number | boolean |
     )
     .join('\r\n')
 
-  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.setAttribute('href', url)
-  link.setAttribute('download', filename.endsWith('.csv') ? filename : `${filename}.csv`)
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
-}
+  const fullCsv = '\uFEFF' + csvContent
 
-/**
- * Membuka jendela cetak / PDF browser dengan tata letak dokumen formal siap print A4.
- */
-export function printHtmlDocument(title: string, bodyHtml: string): void {
-  const printWindow = window.open('', '_blank', 'width=900,height=700')
-  if (!printWindow) {
-    alert('Pop-up jendela cetak diblokir oleh browser. Izinkan pop-up untuk mengunduh PDF/mencetak dokumen.')
+  // 1. Jika berjalan di dalam APK Android KasKita dengan native bridge
+  if (typeof window !== 'undefined' && typeof window.KasKitaAndroidPrint?.shareCsv === 'function') {
+    window.KasKitaAndroidPrint.shareCsv(safeFilename, fullCsv)
     return
   }
 
+  // 2. Jika berjalan di Capacitor / Mobile WebView yang mendukung Web Share File API
+  if (Capacitor.isNativePlatform() && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    try {
+      const file = new File([fullCsv], safeFilename, { type: 'text/csv;charset=utf-8;' })
+      if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+        void navigator.share({
+          title: safeFilename,
+          files: [file],
+        })
+        return
+      }
+    } catch {
+      // Lanjut ke mekanisme anchor download standar
+    }
+  }
+
+  // 3. Browser standar (Desktop / Chrome Mobile)
+  const blob = new Blob([fullCsv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.setAttribute('href', url)
+  link.setAttribute('download', safeFilename)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  setTimeout(() => URL.revokeObjectURL(url), 1500)
+}
+
+/**
+ * Menampilkan pratinjau dokumen formal siap cetak A4 di dalam modal in-app (tanpa menimpa halaman utama).
+ * Aman digunakan di APK Android WebView maupun browser Desktop/Mobile:
+ * - Dilengkapi tombol "← Kembali" di bilah atas
+ * - Mendukung tombol Back fisik HP Android & tombol Escape
+ * - Mendukung dialog Simpan PDF bawaan Android (PrintManager) maupun browser print
+ */
+export function printHtmlDocument(title: string, bodyHtml: string): void {
   const currentDate = new Intl.DateTimeFormat('id-ID', { dateStyle: 'full' }).format(new Date())
 
   const fullHtml = `<!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title}</title>
   <style>
     @page {
@@ -61,7 +107,7 @@ export function printHtmlDocument(title: string, bodyHtml: string): void {
       color: #1a231e;
       background: #ffffff;
       margin: 0;
-      padding: 10px;
+      padding: 16px;
       font-size: 11pt;
       line-height: 1.4;
     }
@@ -72,6 +118,7 @@ export function printHtmlDocument(title: string, bodyHtml: string): void {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
+      gap: 12px;
     }
     .header-kop .brand {
       font-size: 18pt;
@@ -101,11 +148,12 @@ export function printHtmlDocument(title: string, bodyHtml: string): void {
     }
     .summary-boxes {
       display: flex;
+      flex-wrap: wrap;
       gap: 12px;
       margin-bottom: 20px;
     }
     .summary-box {
-      flex: 1;
+      flex: 1 1 150px;
       padding: 10px 14px;
       border: 1px solid #ccd8d1;
       border-radius: 6px;
@@ -123,6 +171,10 @@ export function printHtmlDocument(title: string, bodyHtml: string): void {
       font-size: 13pt;
       color: #163328;
       margin-top: 4px;
+    }
+    .table-scroll {
+      width: 100%;
+      overflow-x: auto;
     }
     table {
       width: 100%;
@@ -160,11 +212,13 @@ export function printHtmlDocument(title: string, bodyHtml: string): void {
       font-weight: 600;
     }
     .tag-green { background: #e2f4ea; color: #155d3e; }
+    .tag-orange { background: #fef3c7; color: #92400e; }
     .tag-gray { background: #eef2f0; color: #44594f; }
     .signatures {
       margin-top: 35px;
       display: flex;
       justify-content: space-between;
+      gap: 16px;
       page-break-inside: avoid;
     }
     .sign-col {
@@ -229,20 +283,156 @@ export function printHtmlDocument(title: string, bodyHtml: string): void {
   <div class="footer-note">
     Dicetak secara otomatis melalui Sistem Informasi KasKita pada ${new Date().toLocaleString('id-ID')}
   </div>
-
-  <script>
-    window.addEventListener('load', () => {
-      setTimeout(() => {
-        window.print();
-      }, 300);
-    });
-  </script>
 </body>
 </html>`
 
-  printWindow.document.open()
-  printWindow.document.write(fullHtml)
-  printWindow.document.close()
+  // Hapus dialog pratinjau sebelumnya jika masih ada
+  const existing = document.getElementById('kaskita-print-preview-dialog')
+  if (existing) existing.remove()
+
+  const dialog = document.createElement('dialog')
+  dialog.id = 'kaskita-print-preview-dialog'
+  dialog.setAttribute('aria-label', `Pratinjau ${title}`)
+  Object.assign(dialog.style, {
+    position: 'fixed',
+    inset: '0',
+    width: '100vw',
+    maxWidth: '100vw',
+    height: '100dvh',
+    maxHeight: '100dvh',
+    margin: '0',
+    padding: '0',
+    border: 'none',
+    background: '#e6ece8',
+    zIndex: '9999',
+    display: 'flex',
+    flexDirection: 'column',
+  })
+
+  // Bilah navigasi atas (Tombol Kembali + Judul + Cetak/Simpan PDF)
+  const toolbar = document.createElement('div')
+  Object.assign(toolbar.style, {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '10px',
+    padding: '12px 16px',
+    background: '#17392f',
+    color: '#ffffff',
+    boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
+    flexShrink: '0',
+  })
+
+  const backBtn = document.createElement('button')
+  backBtn.type = 'button'
+  backBtn.textContent = '← Kembali'
+  Object.assign(backBtn.style, {
+    padding: '8px 14px',
+    borderRadius: '8px',
+    border: '1px solid rgba(255,255,255,0.28)',
+    background: 'rgba(255,255,255,0.12)',
+    color: '#ffffff',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  })
+
+  const titleEl = document.createElement('div')
+  titleEl.textContent = title
+  Object.assign(titleEl.style, {
+    fontSize: '13px',
+    fontWeight: '700',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flex: '1',
+    textAlign: 'center',
+  })
+
+  const printBtn = document.createElement('button')
+  printBtn.type = 'button'
+  printBtn.textContent = 'Simpan PDF / Cetak'
+  Object.assign(printBtn.style, {
+    padding: '8px 14px',
+    borderRadius: '8px',
+    border: 'none',
+    background: '#bce58a',
+    color: '#17392f',
+    fontSize: '13px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  })
+
+  toolbar.appendChild(backBtn)
+  toolbar.appendChild(titleEl)
+  toolbar.appendChild(printBtn)
+
+  // Area pratinjau dokumen
+  const frameWrap = document.createElement('div')
+  Object.assign(frameWrap.style, {
+    flex: '1',
+    overflow: 'auto',
+    padding: '12px',
+    display: 'flex',
+    justifyContent: 'center',
+  })
+
+  const iframe = document.createElement('iframe')
+  iframe.title = title
+  iframe.srcdoc = fullHtml
+  Object.assign(iframe.style, {
+    width: 'min(900px, 100%)',
+    minHeight: '100%',
+    border: '1px solid #cbd5cf',
+    borderRadius: '8px',
+    background: '#ffffff',
+    boxShadow: '0 8px 24px rgba(23, 57, 47, 0.1)',
+  })
+
+  frameWrap.appendChild(iframe)
+  dialog.appendChild(toolbar)
+  dialog.appendChild(frameWrap)
+  document.body.appendChild(dialog)
+
+  // Tambahkan state history agar tombol Back browser/gesture HP menutup modal, bukan keluar halaman
+  let closedViaPopState = false
+  window.history.pushState({ kaskitaPrintModal: true }, '')
+
+  const handlePopState = () => {
+    closedViaPopState = true
+    if (dialog.open) dialog.close()
+  }
+  window.addEventListener('popstate', handlePopState)
+
+  const cleanup = () => {
+    window.removeEventListener('popstate', handlePopState)
+    if (dialog.isConnected) dialog.remove()
+    if (!closedViaPopState && window.history.state?.kaskitaPrintModal) {
+      window.history.back()
+    }
+  }
+
+  dialog.addEventListener('close', cleanup, { once: true })
+  backBtn.addEventListener('click', () => {
+    dialog.close()
+  })
+
+  printBtn.addEventListener('click', () => {
+    // 1. Jika APK Android memiliki native PrintManager bridge
+    if (typeof window.KasKitaAndroidPrint?.printHtml === 'function') {
+      window.KasKitaAndroidPrint.printHtml(title, fullHtml)
+      return
+    }
+    // 2. Cetak melalui iframe standar browser
+    if (iframe.contentWindow) {
+      iframe.contentWindow.focus()
+      iframe.contentWindow.print()
+    }
+  })
+
+  dialog.showModal()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

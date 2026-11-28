@@ -34,6 +34,7 @@ import { useAuth } from '../../auth/AuthContext'
 import { useResource } from '../../hooks/useResource'
 import { api, jsonBody } from '../../lib/api'
 import {
+  canExportDocuments,
   exportRondaScheduleCsv,
   exportRondaSchedulePrint,
   exportWargaListCsv,
@@ -1491,6 +1492,7 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
   const canCreate = !compact && Boolean(permission?.canCreate || isManagerRole)
   const canUpdate = !compact && Boolean(permission?.canUpdate || isManagerRole)
   const canDelete = !compact && Boolean(permission?.canDelete || isManagerRole)
+  const canExport = !compact && canExportDocuments(user)
 
   function openHouseForm(house: HouseArrears | null = null) {
     setEditingHouse(house)
@@ -1570,7 +1572,7 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
                 ✓ {rows.filter((r) => r.ktpVerified && r.kkVerified).length} Berkas Lengkap
               </span>
             )}
-            {!compact && filteredRows.length > 0 && (
+            {canExport && filteredRows.length > 0 && (
               <>
                 <Button
                   className="button-small"
@@ -2584,6 +2586,7 @@ export function RondaPanel({ readonly = false }: { readonly?: boolean }) {
   const { user } = useAuth()
   const permission = user?.menus.find((menu) => menu.key === 'ronda')
   const canManage = !readonly && Boolean(permission?.canCreate || permission?.canUpdate || permission?.canDelete)
+  const canExport = canExportDocuments(user)
 
   const resource = useResource<RondaSchedule[]>('/api/ronda/schedules')
   const housesResource = useResource<HouseArrears[]>(canManage ? '/api/ketua/houses/arrears' : null)
@@ -2743,7 +2746,7 @@ export function RondaPanel({ readonly = false }: { readonly?: boolean }) {
           description="Pembagian regu ronda malam (Malam Senin s.d. Malam Minggu) untuk menjaga keamanan lingkungan."
           action={(
             <div className="arrears-heading-actions">
-              {schedules.length > 0 && (
+              {canExport && schedules.length > 0 && (
                 <>
                   <Button
                     className="button-small"

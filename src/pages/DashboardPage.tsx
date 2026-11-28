@@ -25,7 +25,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { Button, Card, LoadingState, Notice, SectionTitle } from '../components/UI'
 import { api } from '../lib/api'
-import { exportFinancialReportCsv, exportFinancialReportPrint } from '../lib/export'
+import { canExportDocuments, exportFinancialReportCsv, exportFinancialReportPrint } from '../lib/export'
 import { formatCurrency } from '../lib/format'
 import { useResource } from '../hooks/useResource'
 import type { Bill, Expense, FinanceSummary, Payment, User, UserRole } from '../types'
@@ -169,6 +169,8 @@ function SummaryCards({ summary }: { summary: FinanceSummary }) {
 }
 
 function FundHighlights({ summary, onlyActive = false }: { summary: FinanceSummary; onlyActive?: boolean }) {
+  const { user } = useAuth()
+  const canExport = canExportDocuments(user)
   const [exporting, setExporting] = useState<'pdf' | 'csv' | null>(null)
   const visibleFunds = onlyActive
     ? summary.funds.filter((fund) => fund.fund_status === 'ACTIVE')
@@ -204,26 +206,30 @@ function FundHighlights({ summary, onlyActive = false }: { summary: FinanceSumma
         action={(
           <div className="arrears-heading-actions">
             <span className="tiny-count">{visibleFunds.length} pos</span>
-            <Button
-              className="button-small"
-              type="button"
-              variant="secondary"
-              disabled={exporting !== null}
-              onClick={() => void handleExportFinance('pdf')}
-              title="Cetak atau simpan Laporan Keuangan sebagai PDF"
-            >
-              <Printer size={14} /> {exporting === 'pdf' ? 'Menyiapkan...' : 'Unduh PDF'}
-            </Button>
-            <Button
-              className="button-small"
-              type="button"
-              variant="secondary"
-              disabled={exporting !== null}
-              onClick={() => void handleExportFinance('csv')}
-              title="Unduh Laporan Keuangan format Excel / CSV"
-            >
-              <Download size={14} /> {exporting === 'csv' ? 'Menyiapkan...' : 'Unduh CSV'}
-            </Button>
+            {canExport && (
+              <>
+                <Button
+                  className="button-small"
+                  type="button"
+                  variant="secondary"
+                  disabled={exporting !== null}
+                  onClick={() => void handleExportFinance('pdf')}
+                  title="Cetak atau simpan Laporan Keuangan sebagai PDF"
+                >
+                  <Printer size={14} /> {exporting === 'pdf' ? 'Menyiapkan...' : 'Unduh PDF'}
+                </Button>
+                <Button
+                  className="button-small"
+                  type="button"
+                  variant="secondary"
+                  disabled={exporting !== null}
+                  onClick={() => void handleExportFinance('csv')}
+                  title="Unduh Laporan Keuangan format Excel / CSV"
+                >
+                  <Download size={14} /> {exporting === 'csv' ? 'Menyiapkan...' : 'Unduh CSV'}
+                </Button>
+              </>
+            )}
           </div>
         )}
       />

@@ -1,0 +1,10 @@
+android/
+ios/
+scripts/
+assets/
+capacitor.config.ts
+capacitor.config.json
+*.apk
+*.aab
+*.keystore
+*.jks

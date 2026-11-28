@@ -348,13 +348,21 @@ export function RbacManagementPanel({ section }: { section: 'users' | 'role-menu
                   {menus.map((menu) => {
                     const permission = draft[role.id]?.[menu.id]
                     const adminManagementMenu = menu.menu_key === 'rbac' || menu.menu_key === 'role_menu'
+                    const exportFeatureMenu = menu.menu_key === 'export'
                     const protectAdmin = role.role_key === 'ADMIN' && adminManagementMenu
                     const adminOtherMenu = role.role_key === 'ADMIN' && !adminManagementMenu
                     const adminOnlyMenu = role.role_key !== 'ADMIN' && adminManagementMenu
                     const wargaOnlyMenu = role.role_key !== 'WARGA' && (menu.menu_key === 'bills' || menu.menu_key === 'profile')
                     return (
                       <tr key={menu.id}>
-                        <td><strong>{menu.label}</strong><small>{menu.menu_key} · {menu.path}</small></td>
+                        <td>
+                          <strong>{menu.label}</strong>
+                          <small>
+                            {exportFeatureMenu
+                              ? 'export · Centang "Lihat" untuk mengaktifkan tombol Unduh PDF & CSV'
+                              : `${menu.menu_key} · ${menu.path}`}
+                          </small>
+                        </td>
                         {(['can_view', 'can_create', 'can_update', 'can_delete'] as const).map((action) => (
                           <td key={action}>
                             <input
@@ -366,6 +374,7 @@ export function RbacManagementPanel({ section }: { section: 'users' | 'role-menu
                                 || adminOtherMenu
                                 || adminOnlyMenu
                                 || wargaOnlyMenu
+                                || (exportFeatureMenu && action !== 'can_view')
                                 || (protectAdmin && (action === 'can_view' || action === 'can_update'))
                               }
                               onChange={(event) => updatePermission(role.id, menu.id, action, event.target.checked)}

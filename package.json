@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "cap:icons": "powershell -ExecutionPolicy Bypass -File scripts/generate-android-icons.ps1",
     "cap:sync": "npm run build && npx cap sync android",
     "cap:open": "npx cap open android"
   },
