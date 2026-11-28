@@ -216,10 +216,10 @@ export function LoginPage() {
               Rapi untuk pengurus, jelas untuk semua warga.
             </p>
           </div>
-          {/* <div className="story-foot">
-            <ShieldCheck size={17} />
-            <span>Data pribadi warga tetap terlindungi</span>
-          </div> */}
+          <div className="story-foot">
+            {/* <ShieldCheck size={17} />
+            <span>Data pribadi warga tetap terlindungi</span> */}
+          </div>
         </section>
 
         <section className="login-side">
