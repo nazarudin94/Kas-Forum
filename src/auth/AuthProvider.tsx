@@ -187,6 +187,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error
     const { error: flagError } = await supabase.rpc('mark_password_changed')
     if (flagError) throw flagError
+    try {
+      const raw = window.localStorage.getItem('kaskita_saved_login_v1')
+      if (raw) {
+        const parsed = JSON.parse(atob(raw)) as { u?: unknown }
+        if (typeof parsed.u === 'string' && parsed.u) {
+          window.localStorage.setItem('kaskita_saved_login_v1', btoa(JSON.stringify({ u: parsed.u, p: password })))
+        }
+      }
+    } catch {
+      // Abaikan jika penyimpanan lokal dibatasi
+    }
   }, [])
 
   const value = useMemo(

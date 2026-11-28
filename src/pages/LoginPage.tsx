@@ -11,6 +11,39 @@ import type { ClaimableHouse, HouseOccupancyStatus } from '../types'
 
 type AuthMode = 'login' | 'claim'
 
+const SAVED_LOGIN_KEY = 'kaskita_saved_login_v1'
+
+function loadSavedCredentials(): { username: string; password: string; remember: boolean } {
+  try {
+    const raw = window.localStorage.getItem(SAVED_LOGIN_KEY)
+    if (!raw) return { username: '', password: '', remember: true }
+    const parsed = JSON.parse(atob(raw)) as { u?: unknown; p?: unknown }
+    if (typeof parsed.u === 'string' && typeof parsed.p === 'string') {
+      return { username: parsed.u, password: parsed.p, remember: true }
+    }
+  } catch {
+    // Abaikan jika format penyimpanan lama tidak valid
+  }
+  return { username: '', password: '', remember: true }
+}
+
+function saveCredentials(username: string, password: string) {
+  try {
+    const encoded = btoa(JSON.stringify({ u: username, p: password }))
+    window.localStorage.setItem(SAVED_LOGIN_KEY, encoded)
+  } catch {
+    // Abaikan jika storage penuh / dibatasi browser
+  }
+}
+
+function clearSavedCredentials() {
+  try {
+    window.localStorage.removeItem(SAVED_LOGIN_KEY)
+  } catch {
+    // Abaikan jika storage dibatasi
+  }
+}
+
 export function LoginPage() {
   const { signIn, startupError } = useAuth()
   const navigate = useNavigate()
@@ -21,9 +54,11 @@ export function LoginPage() {
     const isClaim = params.get('mode') === 'claim' || Boolean(rawCode)
     return { isClaim, rawCode, rawHouse }
   })
+  const [savedCreds] = useState(() => loadSavedCredentials())
   const [mode, setMode] = useState<AuthMode>(() => (initialParams.isClaim ? 'claim' : 'login'))
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
+  const [username, setUsername] = useState(() => savedCreds.username)
+  const [password, setPassword] = useState(() => savedCreds.password)
+  const [rememberMe, setRememberMe] = useState(() => savedCreds.remember)
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -102,7 +137,13 @@ export function LoginPage() {
     setSubmitting(true)
     setError(null)
     try {
-      const user = await signIn(username.trim(), password)
+      const trimmedUsername = username.trim()
+      const user = await signIn(trimmedUsername, password)
+      if (rememberMe) {
+        saveCredentials(trimmedUsername, password)
+      } else {
+        clearSavedCredentials()
+      }
       navigate(dashboardPathForRole(user.role), { replace: true })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Login gagal. Periksa kembali data Anda.')
@@ -150,6 +191,7 @@ export function LoginPage() {
         },
       )
       const loggedInUser = await signIn(result.username, claimPassword)
+      saveCredentials(result.username, claimPassword)
       navigate(dashboardPathForRole(loggedInUser.role), { replace: true })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Aktivasi akun warga gagal.')
@@ -222,10 +264,13 @@ export function LoginPage() {
             {(error || startupError) && <Notice>{error || startupError}</Notice>}
 
             {mode === 'login' ? (
-              <form className="form-stack" onSubmit={handleLoginSubmit}>
+              <form className="form-stack" name="kaskita-login" method="post" onSubmit={handleLoginSubmit}>
                 <label className="field">
                   <span>Kode rumah / username</span>
                   <input
+                    id="login-username"
+                    name="username"
+                    type="text"
                     autoComplete="username"
                     placeholder="Contoh: F-01"
                     value={username}
@@ -237,6 +282,8 @@ export function LoginPage() {
                   <span>Password</span>
                   <span className="password-input">
                     <input
+                      id="login-password"
+                      name="password"
                       autoComplete="current-password"
                       type={showPassword ? 'text' : 'password'}
                       placeholder="Masukkan password"
@@ -253,6 +300,36 @@ export function LoginPage() {
                       {showPassword ? <Eye size={16} /> : <EyeOff size={16} />}
                     </button>
                   </span>
+                </label>
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    fontSize: '13px',
+                    color: '#415548',
+                    marginTop: '-2px',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(event) => {
+                      const checked = event.target.checked
+                      setRememberMe(checked)
+                      if (!checked) clearSavedCredentials()
+                    }}
+                    style={{
+                      width: '16px',
+                      height: '16px',
+                      accentColor: '#1b4332',
+                      cursor: 'pointer',
+                      margin: 0,
+                    }}
+                  />
+                  <span>Ingat username &amp; password di perangkat ini</span>
                 </label>
                 <Button className="login-submit" type="submit" disabled={submitting}>
                   {submitting ? 'Memeriksa...' : 'Masuk'}

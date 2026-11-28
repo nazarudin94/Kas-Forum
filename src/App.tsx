@@ -90,12 +90,19 @@ function App() {
         openDialog.close()
         return
       }
-      // 2. Jika histori halaman bisa kembali, navigasi mundur
+      // 2. Jika berada di halaman Login ('/' atau '/login'), langsung keluar dari aplikasi
+      //    meskipun WebView masih menyimpan riwayat halaman sebelum logout
+      const currentPath = window.location.pathname
+      if (currentPath === '/' || currentPath === '/login') {
+        void CapacitorApp.exitApp()
+        return
+      }
+      // 3. Jika histori halaman bisa kembali, navigasi mundur
       if (canGoBack) {
         window.history.back()
         return
       }
-      // 3. Jika sudah di halaman utama, keluar dari aplikasi
+      // 4. Keluar dari aplikasi
       void CapacitorApp.exitApp()
     }).then((handle) => {
       listenerHandle = handle
