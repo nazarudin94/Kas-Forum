@@ -1750,11 +1750,6 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
                       : 'Dihuni pemilik'}
                   {row.hasAccount && !row.claimCode ? ' · Akun aktif' : ''}
                 </span>
-                {!compact && row.occupancyStatus === 'RENTED' && row.ownerPhone && (
-                  <span className="house-owner-badge" title="Kontak pemilik/yang mengontrakkan">
-                    Pemilik: <a href={`https://wa.me/${row.ownerPhone.replace(/[^0-9]/g, '').replace(/^0/, '62')}`} target="_blank" rel="noreferrer" className="wa-link">{row.ownerPhone}</a>
-                  </span>
-                )}
                 <span style={{ display: 'inline-flex', gap: '4px', flexWrap: 'wrap', marginTop: '2px' }}>
                   <span className={`doc-badge ${row.ktpVerified ? 'doc-badge-verified' : 'doc-badge-pending'}`} title={row.ktpVerified ? 'KTP sudah diverifikasi Sekretaris' : 'KTP belum diserahkan'}>
                     KTP {row.ktpVerified ? '✓' : '—'}
@@ -1763,25 +1758,89 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
                     KK {row.kkVerified ? '✓' : '—'}
                   </span>
                 </span>
-                {!compact && (row.phone || row.phoneMasked) && (
-                  <span className="house-contact-badge">
-                    {row.phone ? (
-                      <a
-                        href={`https://wa.me/${row.phone.replace(/[^0-9]/g, '').replace(/^0/, '62')}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="wa-link"
-                        title="Hubungi warga via WhatsApp (urgent)"
-                      >
-                        <MessageCircle size={13} /> {row.phone}
-                      </a>
-                    ) : (
-                      <span><Phone size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} />{row.phoneMasked}</span>
-                    )}
-                  </span>
-                )}
+
+                {/* Kontak Telepon: Pemilik dan Pengontrak / Warga */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginTop: '4px' }}>
+                  {row.occupancyStatus === 'RENTED' ? (
+                    <>
+                      {/* Kontak Pemilik Rumah */}
+                      <span className="house-owner-badge" style={{ margin: 0 }} title="Kontak Pemilik Rumah (Yang Mengontrakkan)">
+                        <strong>Pemilik:</strong>{' '}
+                        {row.ownerPhone ? (
+                          <a
+                            href={`https://wa.me/${row.ownerPhone.replace(/[^0-9]/g, '').replace(/^0/, '62')}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="wa-link"
+                          >
+                            <MessageCircle size={12} /> {row.ownerPhone}
+                          </a>
+                        ) : (
+                          <i style={{ color: '#b45309', fontSize: '11px' }}>Belum ada no HP</i>
+                        )}
+                      </span>
+
+                      {/* Kontak Warga yang Mengontrak */}
+                      <span className="house-contact-badge" style={{ margin: 0 }} title="Kontak Warga yang Mengontrak">
+                        <strong>Pengontrak:</strong>{' '}
+                        {row.phone ? (
+                          <a
+                            href={`https://wa.me/${row.phone.replace(/[^0-9]/g, '').replace(/^0/, '62')}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="wa-link"
+                            title="Hubungi pengontrak via WhatsApp"
+                          >
+                            <MessageCircle size={12} /> {row.phone}
+                          </a>
+                        ) : row.phoneMasked ? (
+                          <span><Phone size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '2px' }} />{row.phoneMasked}</span>
+                        ) : (
+                          <i style={{ color: '#83958b', fontSize: '11px' }}>Belum ada no HP</i>
+                        )}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      {/* Dihuni Pemilik */}
+                      {(row.phone || row.phoneMasked) && (
+                        <span className="house-contact-badge" style={{ margin: 0 }} title="Kontak Warga / Penghuni">
+                          <strong>Warga:</strong>{' '}
+                          {row.phone ? (
+                            <a
+                              href={`https://wa.me/${row.phone.replace(/[^0-9]/g, '').replace(/^0/, '62')}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="wa-link"
+                              title="Hubungi warga via WhatsApp"
+                            >
+                              <MessageCircle size={12} /> {row.phone}
+                            </a>
+                          ) : (
+                            <span><Phone size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '2px' }} />{row.phoneMasked}</span>
+                          )}
+                        </span>
+                      )}
+                      {/* Rumah Belum Dihuni tapi ada Kontak Pemilik */}
+                      {row.occupancyStatus === 'VACANT' && row.ownerPhone && (
+                        <span className="house-owner-badge" style={{ margin: 0 }} title="Kontak Pemilik">
+                          <strong>Pemilik:</strong>{' '}
+                          <a
+                            href={`https://wa.me/${row.ownerPhone.replace(/[^0-9]/g, '').replace(/^0/, '62')}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="wa-link"
+                          >
+                            <MessageCircle size={12} /> {row.ownerPhone}
+                          </a>
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+
                 {!compact && row.claimCode && (
-                  <span className="house-claim-badge">
+                  <span className="house-claim-badge" style={{ marginTop: '4px' }}>
                     Kode klaim: <b>{row.claimCode}</b>
                   </span>
                 )}
@@ -2107,6 +2166,42 @@ function VerifyDocsForm({
         </div>
         <div style={{ fontSize: '12px', color: '#687e72', marginTop: '2px' }}>
           Blok {house.blockCode} No. {house.houseNumber} · {house.occupancyStatus === 'RENTED' ? 'Dikontrakan' : house.occupancyStatus === 'VACANT' ? 'Belum dihuni' : 'Dihuni pemilik'}
+        </div>
+
+        {/* Informasi Kontak Telepon (Pemilik & Pengontrak) */}
+        <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #ccd8d1', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+          {house.occupancyStatus === 'RENTED' ? (
+            <>
+              <div>
+                <strong style={{ color: '#163326' }}>No. HP Pemilik:</strong>{' '}
+                {house.ownerPhone ? (
+                  <a href={`https://wa.me/${house.ownerPhone.replace(/[^0-9]/g, '').replace(/^0/, '62')}`} target="_blank" rel="noreferrer" className="wa-link" style={{ fontWeight: 500 }}>
+                    <MessageCircle size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '2px' }} />
+                    {house.ownerPhone}
+                  </a>
+                ) : <span style={{ color: '#b45309' }}>Belum diisi</span>}
+              </div>
+              <div>
+                <strong style={{ color: '#163326' }}>No. HP Pengontrak:</strong>{' '}
+                {(house.phone || house.phoneMasked) ? (
+                  <a href={`https://wa.me/${(house.phone || '').replace(/[^0-9]/g, '').replace(/^0/, '62')}`} target="_blank" rel="noreferrer" className="wa-link" style={{ fontWeight: 500 }}>
+                    <MessageCircle size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '2px' }} />
+                    {house.phone || house.phoneMasked}
+                  </a>
+                ) : <span style={{ color: '#83958b' }}>Belum diisi</span>}
+              </div>
+            </>
+          ) : (
+            <div>
+              <strong style={{ color: '#163326' }}>No. HP Warga:</strong>{' '}
+              {(house.phone || house.phoneMasked) ? (
+                <a href={`https://wa.me/${(house.phone || '').replace(/[^0-9]/g, '').replace(/^0/, '62')}`} target="_blank" rel="noreferrer" className="wa-link" style={{ fontWeight: 500 }}>
+                  <MessageCircle size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '2px' }} />
+                  {house.phone || house.phoneMasked}
+                </a>
+              ) : <span style={{ color: '#83958b' }}>Belum diisi</span>}
+            </div>
+          )}
         </div>
       </div>
 

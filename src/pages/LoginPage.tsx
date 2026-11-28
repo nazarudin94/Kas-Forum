@@ -1,6 +1,6 @@
 import type { ClipboardEvent, FormEvent } from 'react'
 import { useState } from 'react'
-import { ArrowUpRight, Eye, EyeOff, KeyRound, Leaf, ShieldCheck } from 'lucide-react'
+import { ArrowUpRight, Eye, EyeOff, KeyRound, Leaf, Search, ShieldCheck, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { Button, LoadingState, Notice } from '../components/UI'
@@ -31,7 +31,12 @@ export function LoginPage() {
   const claimableHousesResource = useResource<ClaimableHouse[]>(
     mode === 'claim' ? '/api/public/claimable-houses' : null,
   )
-  const claimableHouses = claimableHousesResource.data ?? []
+  const allClaimableHouses = claimableHousesResource.data ?? []
+  // Hanya tampilkan rumah yang belum diaktifkan (belum memiliki akun aktif)
+  const unactivatedHouses = allClaimableHouses.filter((item) => !item.hasAccount)
+
+  const [houseSearchQuery, setHouseSearchQuery] = useState('')
+  const [houseBlockFilter, setHouseBlockFilter] = useState('ALL')
   const [selectedHouseId, setSelectedHouseId] = useState('')
   const [claimCode, setClaimCode] = useState(() => initialParams.rawCode)
   const [fullName, setFullName] = useState('')
@@ -43,9 +48,23 @@ export function LoginPage() {
   const [showClaimPassword, setShowClaimPassword] = useState(false)
   const [showConfirmClaimPassword, setShowConfirmClaimPassword] = useState(false)
 
-  const activeClaimHouse = claimableHouses.find((item) => String(item.houseId) === selectedHouseId)
-    ?? (initialParams.rawHouse ? claimableHouses.find((item) => item.houseCode === initialParams.rawHouse) : undefined)
-    ?? claimableHouses[0]
+  const availableBlocks = Array.from(new Set(unactivatedHouses.map((item) => item.blockCode).filter(Boolean))).sort()
+
+  const filteredClaimableHouses = unactivatedHouses.filter((item) => {
+    if (houseBlockFilter !== 'ALL' && item.blockCode !== houseBlockFilter) return false
+    if (houseSearchQuery.trim()) {
+      const q = houseSearchQuery.toLowerCase().trim()
+      return item.houseCode.toLowerCase().includes(q)
+        || item.blockCode.toLowerCase().includes(q)
+        || item.houseNumber.toLowerCase().includes(q)
+    }
+    return true
+  })
+
+  const activeClaimHouse = filteredClaimableHouses.find((item) => String(item.houseId) === selectedHouseId)
+    ?? (selectedHouseId ? unactivatedHouses.find((item) => String(item.houseId) === selectedHouseId) : undefined)
+    ?? (initialParams.rawHouse ? unactivatedHouses.find((item) => item.houseCode === initialParams.rawHouse) : undefined)
+    ?? filteredClaimableHouses[0]
 
   function handleClaimCodePaste(event: ClipboardEvent<HTMLInputElement>) {
     const pasted = event.clipboardData.getData('text')
@@ -56,7 +75,7 @@ export function LoginPage() {
       event.preventDefault()
       setClaimCode(codeMatch[1].toUpperCase())
       if (houseMatch) {
-        const matchedHouse = claimableHouses.find(
+        const matchedHouse = unactivatedHouses.find(
           (item) => item.houseCode.toUpperCase() === houseMatch[1].toUpperCase(),
         )
         if (matchedHouse) setSelectedHouseId(String(matchedHouse.houseId))
@@ -242,151 +261,231 @@ export function LoginPage() {
               </form>
             ) : claimableHousesResource.loading && !claimableHousesResource.data ? (
               <LoadingState label="Memuat daftar rumah..." />
-            ) : claimableHouses.length === 0 ? (
+            ) : unactivatedHouses.length === 0 ? (
               <Notice variant="info">
-                Belum ada rumah yang menunggu aktivasi. Jika rumah Anda belum terdaftar atau lupa password, minta kode klaim ke pengurus blok.
+                Belum ada rumah yang menunggu aktivasi baru. Semua rumah yang terdaftar telah aktif atau belum diterbitkan kode klaim oleh pengurus.
               </Notice>
             ) : (
               <form className="form-stack" onSubmit={handleClaimSubmit}>
-                <div className="claim-form-grid">
-                  <label className="field field-sm">
-                    <span>Pilih nomor rumah</span>
-                    <select
-                      value={activeClaimHouse ? String(activeClaimHouse.houseId) : ''}
-                      onChange={(event) => setSelectedHouseId(event.target.value)}
-                      required
-                    >
-                      {claimableHouses.map((house) => (
-                        <option key={house.houseId} value={house.houseId}>
-                          {house.houseCode} {house.hasAccount ? '(Reset password)' : '(Aktivasi baru)'}
-                        </option>
-                      ))}
-                    </select>
-                    <small>
-                      Username login: <b>{activeClaimHouse?.houseCode}</b>
-                    </small>
-                  </label>
-
-                  <label className="field field-sm">
-                    <span>Kode klaim pengurus (6 kar.)</span>
-                    <input
-                      autoComplete="off"
-                      maxLength={6}
-                      placeholder="Contoh: K7P9M4"
-                      value={claimCode}
-                      onPaste={handleClaimCodePaste}
-                      onChange={(event) => setClaimCode(event.target.value.toUpperCase())}
-                      required
-                    />
-                  </label>
-
-                  <label className="field field-sm">
-                    <span>Nama lengkap / kepala warga</span>
-                    <input
-                      autoComplete="name"
-                      maxLength={120}
-                      placeholder="Contoh: Budi Santoso"
-                      value={fullName}
-                      onChange={(event) => setFullName(event.target.value)}
-                      required
-                    />
-                  </label>
-
-                  <label className="field field-sm">
-                    <span>Status hunian</span>
-                    <select
-                      value={occupancyStatus}
-                      onChange={(event) => setOccupancyStatus(event.target.value as HouseOccupancyStatus)}
-                    >
-                      <option value="OWNER_OCCUPIED">Dihuni pemilik</option>
-                      <option value="RENTED">Dikontrakan</option>
-                      <option value="VACANT">Belum dihuni</option>
-                    </select>
-                  </label>
-
-                  {occupancyStatus === 'RENTED' && (
-                    <>
-                      <label className="field field-sm claim-field-full">
-                        <span>No. HP/WA Pemilik Rumah <small>(Yang Mengontrakkan)</small> <span style={{ color: '#dc2626' }}>*</span></span>
-                        <input
-                          type="tel"
-                          required
-                          maxLength={30}
-                          placeholder="Contoh: 0812-3456-7890"
-                          value={ownerPhone}
-                          onChange={(event) => setOwnerPhone(event.target.value)}
-                        />
-                      </label>
-                      <div className="claim-field-full" style={{ fontSize: '11px', color: '#1e3a8a', background: '#eff6ff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #bfdbfe', margin: '4px 0 8px' }}>
-                        📌 <b>Perhatian Rumah Dikontrakan:</b> Berkas KTP & KK yang harus diserahkan kepada Sekretaris berjumlah <b>2 berkas</b> (1 berkas milik Pemilik Rumah dan 1 berkas milik Warga yang Mengontrak).
-                      </div>
-                    </>
-                  )}
-
-                  <label className="field field-sm claim-field-full">
-                    <span>No. WhatsApp / Telepon <small>(opsional)</small></span>
-                    <input
-                      type="tel"
-                      maxLength={30}
-                      placeholder="Contoh: 0812-3456-7890"
-                      value={phone}
-                      onChange={(event) => setPhone(event.target.value)}
-                    />
-                  </label>
-
-                  <label className="field field-sm">
-                    <span>Buat password (min. 6 kar.)</span>
-                    <span className="password-input">
-                      <input
-                        autoComplete="new-password"
-                        type={showClaimPassword ? 'text' : 'password'}
-                        minLength={6}
-                        maxLength={72}
-                        placeholder="Buat password"
-                        value={claimPassword}
-                        onChange={(event) => setClaimPassword(event.target.value)}
-                        required
-                      />
-                      <button
-                        className="password-toggle"
-                        type="button"
-                        onClick={() => setShowClaimPassword((shown) => !shown)}
-                        aria-label={showClaimPassword ? 'Sembunyikan password' : 'Tampilkan password'}
-                      >
-                        {showClaimPassword ? <Eye size={16} /> : <EyeOff size={16} />}
-                      </button>
+                {/* Panel Pencarian & Filter Rumah */}
+                <div style={{ background: '#f8faf9', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8e4', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#163326' }}>
+                      Cari Rumah ({filteredClaimableHouses.length} dari {unactivatedHouses.length} belum aktif)
                     </span>
-                  </label>
-
-                  <label className="field field-sm">
-                    <span>Ulangi password</span>
-                    <span className="password-input">
-                      <input
-                        autoComplete="new-password"
-                        type={showConfirmClaimPassword ? 'text' : 'password'}
-                        minLength={6}
-                        maxLength={72}
-                        placeholder="Ketik ulang password"
-                        value={confirmClaimPassword}
-                        onChange={(event) => setConfirmClaimPassword(event.target.value)}
-                        required
-                      />
+                    {(houseSearchQuery || houseBlockFilter !== 'ALL') && (
                       <button
-                        className="password-toggle"
                         type="button"
-                        onClick={() => setShowConfirmClaimPassword((shown) => !shown)}
-                        aria-label={showConfirmClaimPassword ? 'Sembunyikan konfirmasi password' : 'Tampilkan konfirmasi password'}
+                        onClick={() => {
+                          setHouseSearchQuery('')
+                          setHouseBlockFilter('ALL')
+                        }}
+                        style={{ border: 'none', background: 'transparent', color: '#1b4332', fontSize: '11px', cursor: 'pointer', textDecoration: 'underline' }}
                       >
-                        {showConfirmClaimPassword ? <Eye size={16} /> : <EyeOff size={16} />}
+                        Reset filter
                       </button>
-                    </span>
-                  </label>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1 1 140px', position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <Search size={14} style={{ position: 'absolute', left: '8px', color: '#687e72' }} />
+                      <input
+                        type="text"
+                        placeholder="Ketik kode/blok/no rumah..."
+                        value={houseSearchQuery}
+                        onChange={(e) => setHouseSearchQuery(e.target.value)}
+                        style={{
+                          width: '100%',
+                          height: '32px',
+                          paddingLeft: '28px',
+                          paddingRight: '24px',
+                          fontSize: '12px',
+                          borderRadius: '6px',
+                          border: '1px solid #ccd8d1',
+                          background: '#ffffff',
+                        }}
+                      />
+                      {houseSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setHouseSearchQuery('')}
+                          style={{ position: 'absolute', right: '6px', background: 'transparent', border: 'none', color: '#83958b', cursor: 'pointer', padding: '2px' }}
+                          title="Hapus pencarian"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                    {availableBlocks.length > 1 && (
+                      <select
+                        value={houseBlockFilter}
+                        onChange={(e) => setHouseBlockFilter(e.target.value)}
+                        style={{
+                          height: '32px',
+                          fontSize: '12px',
+                          borderRadius: '6px',
+                          border: '1px solid #ccd8d1',
+                          background: '#ffffff',
+                          padding: '0 8px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <option value="ALL">Semua Blok</option>
+                        {availableBlocks.map((b) => (
+                          <option key={b} value={b}>Blok {b}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
                 </div>
 
-                <Button className="login-submit" type="submit" disabled={submitting}>
-                  {submitting ? 'Mengaktifkan akun...' : 'Aktivasi & Masuk'}
-                  {!submitting && <ArrowUpRight size={17} />}
-                </Button>
+                {filteredClaimableHouses.length === 0 ? (
+                  <Notice variant="info">
+                    Tidak ditemukan rumah belum aktif yang cocok dengan filter. Silakan reset kata kunci pencarian.
+                  </Notice>
+                ) : (
+                  <>
+                    <div className="claim-form-grid">
+                      <label className="field field-sm">
+                        <span>Pilih nomor rumah</span>
+                        <select
+                          value={activeClaimHouse ? String(activeClaimHouse.houseId) : ''}
+                          onChange={(event) => setSelectedHouseId(event.target.value)}
+                          required
+                        >
+                          {filteredClaimableHouses.map((house) => (
+                            <option key={house.houseId} value={house.houseId}>
+                              {house.houseCode} (Blok {house.blockCode} No. {house.houseNumber})
+                            </option>
+                          ))}
+                        </select>
+                        <small>
+                          Username login: <b>{activeClaimHouse?.houseCode}</b>
+                        </small>
+                      </label>
+
+                      <label className="field field-sm">
+                        <span>Kode klaim pengurus (6 kar.)</span>
+                        <input
+                          autoComplete="off"
+                          maxLength={6}
+                          placeholder="Contoh: K7P9M4"
+                          value={claimCode}
+                          onPaste={handleClaimCodePaste}
+                          onChange={(event) => setClaimCode(event.target.value.toUpperCase())}
+                          required
+                        />
+                      </label>
+
+                      <label className="field field-sm">
+                        <span>Nama lengkap / kepala warga</span>
+                        <input
+                          autoComplete="name"
+                          maxLength={120}
+                          placeholder="Contoh: Budi Santoso"
+                          value={fullName}
+                          onChange={(event) => setFullName(event.target.value)}
+                          required
+                        />
+                      </label>
+
+                      <label className="field field-sm">
+                        <span>Status hunian</span>
+                        <select
+                          value={occupancyStatus}
+                          onChange={(event) => setOccupancyStatus(event.target.value as HouseOccupancyStatus)}
+                        >
+                          <option value="OWNER_OCCUPIED">Dihuni pemilik</option>
+                          <option value="RENTED">Dikontrakan</option>
+                          <option value="VACANT">Belum dihuni</option>
+                        </select>
+                      </label>
+
+                      {occupancyStatus === 'RENTED' && (
+                        <>
+                          <label className="field field-sm claim-field-full">
+                            <span>No. HP/WA Pemilik Rumah <small>(Yang Mengontrakkan)</small> <span style={{ color: '#dc2626' }}>*</span></span>
+                            <input
+                              type="tel"
+                              required
+                              maxLength={30}
+                              placeholder="Contoh: 0812-3456-7890"
+                              value={ownerPhone}
+                              onChange={(event) => setOwnerPhone(event.target.value)}
+                            />
+                          </label>
+                          <div className="claim-field-full" style={{ fontSize: '11px', color: '#1e3a8a', background: '#eff6ff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #bfdbfe', margin: '4px 0 8px' }}>
+                            📌 <b>Perhatian Rumah Dikontrakan:</b> Berkas KTP & KK yang harus diserahkan kepada Sekretaris berjumlah <b>2 berkas</b> (1 berkas milik Pemilik Rumah dan 1 berkas milik Warga yang Mengontrak).
+                          </div>
+                        </>
+                      )}
+
+                      <label className="field field-sm claim-field-full">
+                        <span>No. WhatsApp / Telepon <small>(opsional)</small></span>
+                        <input
+                          type="tel"
+                          maxLength={30}
+                          placeholder="Contoh: 0812-3456-7890"
+                          value={phone}
+                          onChange={(event) => setPhone(event.target.value)}
+                        />
+                      </label>
+
+                      <label className="field field-sm">
+                        <span>Buat password (min. 6 kar.)</span>
+                        <span className="password-input">
+                          <input
+                            autoComplete="new-password"
+                            type={showClaimPassword ? 'text' : 'password'}
+                            minLength={6}
+                            maxLength={72}
+                            placeholder="Buat password"
+                            value={claimPassword}
+                            onChange={(event) => setClaimPassword(event.target.value)}
+                            required
+                          />
+                          <button
+                            className="password-toggle"
+                            type="button"
+                            onClick={() => setShowClaimPassword((shown) => !shown)}
+                            aria-label={showClaimPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                          >
+                            {showClaimPassword ? <Eye size={16} /> : <EyeOff size={16} />}
+                          </button>
+                        </span>
+                      </label>
+
+                      <label className="field field-sm">
+                        <span>Ulangi password</span>
+                        <span className="password-input">
+                          <input
+                            autoComplete="new-password"
+                            type={showConfirmClaimPassword ? 'text' : 'password'}
+                            minLength={6}
+                            maxLength={72}
+                            placeholder="Ketik ulang password"
+                            value={confirmClaimPassword}
+                            onChange={(event) => setConfirmClaimPassword(event.target.value)}
+                            required
+                          />
+                          <button
+                            className="password-toggle"
+                            type="button"
+                            onClick={() => setShowConfirmClaimPassword((shown) => !shown)}
+                            aria-label={showConfirmClaimPassword ? 'Sembunyikan konfirmasi password' : 'Tampilkan konfirmasi password'}
+                          >
+                            {showConfirmClaimPassword ? <Eye size={16} /> : <EyeOff size={16} />}
+                          </button>
+                        </span>
+                      </label>
+                    </div>
+
+                    <Button className="login-submit" type="submit" disabled={submitting}>
+                      {submitting ? 'Mengaktifkan akun...' : 'Aktivasi & Masuk'}
+                      {!submitting && <ArrowUpRight size={17} />}
+                    </Button>
+                  </>
+                )}
               </form>
             )}
 
