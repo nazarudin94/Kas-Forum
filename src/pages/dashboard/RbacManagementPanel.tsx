@@ -77,12 +77,51 @@ function initialDraft(roles: RbacRole[], menus: RbacMenu[], permissions: RoleMen
 }
 
 async function invokeAdminUserManagement(body: Record<string, unknown>) {
-  const schema = getSupabaseSchema()
-  const { error } = await getSupabase().functions.invoke('admin-user-management', {
-    body,
-    headers: {
-      'x-target-schema': schema,
-    },
+  const supabase = getSupabase()
+  const action = body.action
+
+  if (action === 'set-active') {
+    const { error: rpcError } = await supabase.rpc('set_user_active', {
+      requested_user_id: body.userId,
+      requested_is_active: body.isActive,
+    })
+    if (!rpcError) return
+    if (!rpcError.message?.includes('not found') && rpcError.code !== 'PGRST202') {
+      throw new Error(rpcError.message)
+    }
+  } else if (action === 'create') {
+    const { error: rpcError } = await supabase.rpc('admin_create_user', {
+      requested_username: String(body.username ?? ''),
+      requested_full_name: String(body.fullName ?? ''),
+      requested_password: String(body.password ?? ''),
+      requested_role_id: Number(body.roleId),
+      requested_warga_id: body.wargaId !== null && body.wargaId !== undefined ? Number(body.wargaId) : null,
+      requested_is_active: body.isActive ?? true,
+    })
+    if (!rpcError) return
+    if (!rpcError.message?.includes('not found') && rpcError.code !== 'PGRST202') {
+      throw new Error(rpcError.message)
+    }
+  } else if (action === 'update') {
+    const { error: rpcError } = await supabase.rpc('admin_update_user', {
+      requested_user_id: body.userId,
+      requested_username: String(body.username ?? ''),
+      requested_full_name: String(body.fullName ?? ''),
+      requested_role_id: Number(body.roleId),
+      requested_warga_id: body.wargaId !== null && body.wargaId !== undefined ? Number(body.wargaId) : null,
+    })
+    if (!rpcError) return
+    if (!rpcError.message?.includes('not found') && rpcError.code !== 'PGRST202') {
+      throw new Error(rpcError.message)
+    }
+  }
+
+  const payloadBody = {
+    ...body,
+    schema: getSupabaseSchema(),
+  }
+  const { error } = await supabase.functions.invoke('admin-user-management', {
+    body: payloadBody,
   })
   if (!error) return
 

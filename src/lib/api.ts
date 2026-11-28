@@ -115,32 +115,60 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   }
 
   if (path === '/api/public/claim-house' && method === 'POST') {
-    const { data, error } = await supabase.functions.invoke('claim-warga-account', {
-      body,
-      headers: {
-        'x-target-schema': getSupabaseSchema(),
-      },
+    const payload = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>
+    // 1. Coba eksekusi melalui PostgreSQL RPC claim_warga_account terlebih dahulu
+    // Ini menjamin query langsung dieksekusi di schema aktif (dev saat local, public saat production)
+    const { data: rpcData, error: rpcError } = await supabase.rpc('claim_warga_account', {
+      requested_house_id: Number(payload.houseId),
+      requested_claim_code: String(payload.claimCode ?? '').trim().toUpperCase(),
+      requested_full_name: String(payload.fullName ?? '').trim(),
+      requested_occupancy_status: String(payload.occupancyStatus ?? ''),
+      requested_phone: payload.phone ? String(payload.phone).trim() : null,
+      requested_owner_phone: payload.ownerPhone ? String(payload.ownerPhone).trim() : null,
+      requested_password: String(payload.password ?? ''),
     })
-    if (error) {
-      let message = error.message
-      if ('context' in error && error.context instanceof Response) {
-        try {
-          const payload: unknown = await error.context.clone().json()
-          if (
-            typeof payload === 'object'
-            && payload !== null
-            && 'message' in payload
-            && typeof payload.message === 'string'
-          ) {
-            message = payload.message
-          }
-        } catch {
-          message = error.message
-        }
-      }
-      throw new Error(message || 'Aktivasi akun warga gagal.')
+
+    if (!rpcError && rpcData) {
+      const parsed = rpcData as { username: string; houseCode?: string; message?: string }
+      return {
+        username: parsed.username,
+        houseCode: parsed.houseCode ?? String(payload.houseId),
+        message: parsed.message ?? 'Akun warga berhasil diaktifkan.',
+      } as T
     }
-    return data as T
+
+    // 2. Jika RPC belum ada di database, gunakan fallback Edge Function claim-warga-account
+    if (rpcError && (rpcError.code === 'PGRST202' || rpcError.message?.includes('not found') || rpcError.message?.includes('function dev.claim_warga_account') || rpcError.message?.includes('function public.claim_warga_account'))) {
+      const payloadBody = {
+        ...payload,
+        schema: getSupabaseSchema(),
+      }
+      const { data, error } = await supabase.functions.invoke('claim-warga-account', {
+        body: payloadBody,
+      })
+      if (error) {
+        let message = error.message
+        if ('context' in error && error.context instanceof Response) {
+          try {
+            const errPayload: unknown = await error.context.clone().json()
+            if (
+              typeof errPayload === 'object'
+              && errPayload !== null
+              && 'message' in errPayload
+              && typeof errPayload.message === 'string'
+            ) {
+              message = errPayload.message
+            }
+          } catch {
+            message = error.message
+          }
+        }
+        throw new Error(message || 'Aktivasi akun warga gagal.')
+      }
+      return data as T
+    }
+
+    throw new Error(rpcError?.message || 'Aktivasi akun warga gagal.')
   }
 
   if ((path === '/api/public/expenses' || path === '/api/ketua/expenses') && method === 'GET') {
@@ -340,10 +368,18 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 
   const resetMatch = path.match(/^\/api\/bendahara\/users\/([^/]+)\/reset-password$/)
   if (resetMatch && method === 'POST') {
+    const targetUserId = resetMatch[1]
+    const { error: rpcError } = await supabase.rpc('admin_reset_warga_password', {
+      requested_user_id: targetUserId,
+    })
+    if (!rpcError) {
+      return { message: 'Password warga berhasil direset.' } as T
+    }
+
     unwrap(await supabase.functions.invoke('reset-warga-password', {
-      body: { userId: resetMatch[1] },
-      headers: {
-        'x-target-schema': getSupabaseSchema(),
+      body: {
+        userId: targetUserId,
+        schema: getSupabaseSchema(),
       },
     }))
     return { message: 'Password warga berhasil direset.' } as T
