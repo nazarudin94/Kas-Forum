@@ -36,6 +36,7 @@ export function LoginPage() {
   const [claimCode, setClaimCode] = useState(() => initialParams.rawCode)
   const [fullName, setFullName] = useState('')
   const [occupancyStatus, setOccupancyStatus] = useState<HouseOccupancyStatus>('OWNER_OCCUPIED')
+  const [ownerPhone, setOwnerPhone] = useState('')
   const [phone, setPhone] = useState('')
   const [claimPassword, setClaimPassword] = useState('')
   const [confirmClaimPassword, setConfirmClaimPassword] = useState('')
@@ -106,6 +107,11 @@ export function LoginPage() {
       return
     }
 
+    if (occupancyStatus === 'RENTED' && !ownerPhone.trim()) {
+      setError('Nomor HP / WhatsApp pemilik rumah yang mengontrakkan wajib diisi.')
+      return
+    }
+
     setSubmitting(true)
     setError(null)
     try {
@@ -118,6 +124,7 @@ export function LoginPage() {
             claimCode: claimCode.trim().toUpperCase(),
             fullName: fullName.trim(),
             occupancyStatus,
+            ownerPhone: occupancyStatus === 'RENTED' ? ownerPhone.trim() || null : null,
             phone: phone.trim() || null,
             password: claimPassword,
           }),
@@ -161,7 +168,7 @@ export function LoginPage() {
               <span>kaskita<span className="brand-dot">.</span></span>
             </a>
           </div>
-          <div className="login-card">
+          <div className={`login-card ${mode === 'claim' ? 'login-card-wide' : ''}`}>
             <div className="login-mode-tabs" role="tablist" aria-label="Mode autentikasi">
               <button
                 type="button"
@@ -224,13 +231,13 @@ export function LoginPage() {
                       onClick={() => setShowPassword((shown) => !shown)}
                       aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
                     >
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      {showPassword ? <Eye size={16} /> : <EyeOff size={16} />}
                     </button>
                   </span>
                 </label>
                 <Button className="login-submit" type="submit" disabled={submitting}>
                   {submitting ? 'Memeriksa...' : 'Masuk'}
-                  {!submitting && <ArrowUpRight size={18} />}
+                  {!submitting && <ArrowUpRight size={16} />}
                 </Button>
               </form>
             ) : claimableHousesResource.loading && !claimableHousesResource.data ? (
@@ -241,115 +248,144 @@ export function LoginPage() {
               </Notice>
             ) : (
               <form className="form-stack" onSubmit={handleClaimSubmit}>
-                <label className="field">
-                  <span>Pilih nomor rumah</span>
-                  <select
-                    value={activeClaimHouse ? String(activeClaimHouse.houseId) : ''}
-                    onChange={(event) => setSelectedHouseId(event.target.value)}
-                    required
-                  >
-                    {claimableHouses.map((house) => (
-                      <option key={house.houseId} value={house.houseId}>
-                        {house.houseCode} {house.hasAccount ? '(Reset password)' : '(Aktivasi baru)'}
-                      </option>
-                    ))}
-                  </select>
-                  <small>
-                    Username login Anda nanti adalah <b>{activeClaimHouse?.houseCode}</b>.
-                  </small>
-                </label>
-                <label className="field">
-                  <span>Kode klaim dari pengurus (6 karakter)</span>
-                  <input
-                    autoComplete="off"
-                    maxLength={6}
-                    placeholder="Contoh: K7P9M4"
-                    value={claimCode}
-                    onPaste={handleClaimCodePaste}
-                    onChange={(event) => setClaimCode(event.target.value.toUpperCase())}
-                    required
-                  />
-                </label>
-                <label className="field">
-                  <span>Nama lengkap / kepala warga</span>
-                  <input
-                    autoComplete="name"
-                    maxLength={120}
-                    placeholder="Contoh: Budi Santoso"
-                    value={fullName}
-                    onChange={(event) => setFullName(event.target.value)}
-                    required
-                  />
-                </label>
-                <label className="field">
-                  <span>Status hunian</span>
-                  <select
-                    value={occupancyStatus}
-                    onChange={(event) => setOccupancyStatus(event.target.value as HouseOccupancyStatus)}
-                  >
-                    <option value="OWNER_OCCUPIED">Dihuni pemilik</option>
-                    <option value="RENTED">Dikontrakan</option>
-                  </select>
-                </label>
-                <label className="field">
-                  <span>No. WhatsApp / Telepon <small>(opsional)</small></span>
-                  <input
-                    type="tel"
-                    maxLength={30}
-                    placeholder="Contoh: 0812-3456-7890"
-                    value={phone}
-                    onChange={(event) => setPhone(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Buat password (min. 6 karakter)</span>
-                  <span className="password-input">
+                <div className="claim-form-grid">
+                  <label className="field field-sm">
+                    <span>Pilih nomor rumah</span>
+                    <select
+                      value={activeClaimHouse ? String(activeClaimHouse.houseId) : ''}
+                      onChange={(event) => setSelectedHouseId(event.target.value)}
+                      required
+                    >
+                      {claimableHouses.map((house) => (
+                        <option key={house.houseId} value={house.houseId}>
+                          {house.houseCode} {house.hasAccount ? '(Reset password)' : '(Aktivasi baru)'}
+                        </option>
+                      ))}
+                    </select>
+                    <small>
+                      Username login: <b>{activeClaimHouse?.houseCode}</b>
+                    </small>
+                  </label>
+
+                  <label className="field field-sm">
+                    <span>Kode klaim pengurus (6 kar.)</span>
                     <input
-                      autoComplete="new-password"
-                      type={showClaimPassword ? 'text' : 'password'}
-                      minLength={6}
-                      maxLength={72}
-                      placeholder="Buat password akun Anda"
-                      value={claimPassword}
-                      onChange={(event) => setClaimPassword(event.target.value)}
+                      autoComplete="off"
+                      maxLength={6}
+                      placeholder="Contoh: K7P9M4"
+                      value={claimCode}
+                      onPaste={handleClaimCodePaste}
+                      onChange={(event) => setClaimCode(event.target.value.toUpperCase())}
                       required
                     />
-                    <button
-                      className="password-toggle"
-                      type="button"
-                      onClick={() => setShowClaimPassword((shown) => !shown)}
-                      aria-label={showClaimPassword ? 'Sembunyikan password' : 'Tampilkan password'}
-                    >
-                      {showClaimPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </span>
-                </label>
-                <label className="field">
-                  <span>Ulangi password</span>
-                  <span className="password-input">
+                  </label>
+
+                  <label className="field field-sm">
+                    <span>Nama lengkap / kepala warga</span>
                     <input
-                      autoComplete="new-password"
-                      type={showConfirmClaimPassword ? 'text' : 'password'}
-                      minLength={6}
-                      maxLength={72}
-                      placeholder="Ketik ulang password"
-                      value={confirmClaimPassword}
-                      onChange={(event) => setConfirmClaimPassword(event.target.value)}
+                      autoComplete="name"
+                      maxLength={120}
+                      placeholder="Contoh: Budi Santoso"
+                      value={fullName}
+                      onChange={(event) => setFullName(event.target.value)}
                       required
                     />
-                    <button
-                      className="password-toggle"
-                      type="button"
-                      onClick={() => setShowConfirmClaimPassword((shown) => !shown)}
-                      aria-label={showConfirmClaimPassword ? 'Sembunyikan konfirmasi password' : 'Tampilkan konfirmasi password'}
+                  </label>
+
+                  <label className="field field-sm">
+                    <span>Status hunian</span>
+                    <select
+                      value={occupancyStatus}
+                      onChange={(event) => setOccupancyStatus(event.target.value as HouseOccupancyStatus)}
                     >
-                      {showConfirmClaimPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </span>
-                </label>
+                      <option value="OWNER_OCCUPIED">Dihuni pemilik</option>
+                      <option value="RENTED">Dikontrakan</option>
+                      <option value="VACANT">Belum dihuni</option>
+                    </select>
+                  </label>
+
+                  {occupancyStatus === 'RENTED' && (
+                    <>
+                      <label className="field field-sm claim-field-full">
+                        <span>No. HP/WA Pemilik Rumah <small>(Yang Mengontrakkan)</small> <span style={{ color: '#dc2626' }}>*</span></span>
+                        <input
+                          type="tel"
+                          required
+                          maxLength={30}
+                          placeholder="Contoh: 0812-3456-7890"
+                          value={ownerPhone}
+                          onChange={(event) => setOwnerPhone(event.target.value)}
+                        />
+                      </label>
+                      <div className="claim-field-full" style={{ fontSize: '11px', color: '#1e3a8a', background: '#eff6ff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #bfdbfe', margin: '4px 0 8px' }}>
+                        📌 <b>Perhatian Rumah Dikontrakan:</b> Berkas KTP & KK yang harus diserahkan kepada Sekretaris berjumlah <b>2 berkas</b> (1 berkas milik Pemilik Rumah dan 1 berkas milik Warga yang Mengontrak).
+                      </div>
+                    </>
+                  )}
+
+                  <label className="field field-sm claim-field-full">
+                    <span>No. WhatsApp / Telepon <small>(opsional)</small></span>
+                    <input
+                      type="tel"
+                      maxLength={30}
+                      placeholder="Contoh: 0812-3456-7890"
+                      value={phone}
+                      onChange={(event) => setPhone(event.target.value)}
+                    />
+                  </label>
+
+                  <label className="field field-sm">
+                    <span>Buat password (min. 6 kar.)</span>
+                    <span className="password-input">
+                      <input
+                        autoComplete="new-password"
+                        type={showClaimPassword ? 'text' : 'password'}
+                        minLength={6}
+                        maxLength={72}
+                        placeholder="Buat password"
+                        value={claimPassword}
+                        onChange={(event) => setClaimPassword(event.target.value)}
+                        required
+                      />
+                      <button
+                        className="password-toggle"
+                        type="button"
+                        onClick={() => setShowClaimPassword((shown) => !shown)}
+                        aria-label={showClaimPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                      >
+                        {showClaimPassword ? <Eye size={16} /> : <EyeOff size={16} />}
+                      </button>
+                    </span>
+                  </label>
+
+                  <label className="field field-sm">
+                    <span>Ulangi password</span>
+                    <span className="password-input">
+                      <input
+                        autoComplete="new-password"
+                        type={showConfirmClaimPassword ? 'text' : 'password'}
+                        minLength={6}
+                        maxLength={72}
+                        placeholder="Ketik ulang password"
+                        value={confirmClaimPassword}
+                        onChange={(event) => setConfirmClaimPassword(event.target.value)}
+                        required
+                      />
+                      <button
+                        className="password-toggle"
+                        type="button"
+                        onClick={() => setShowConfirmClaimPassword((shown) => !shown)}
+                        aria-label={showConfirmClaimPassword ? 'Sembunyikan konfirmasi password' : 'Tampilkan konfirmasi password'}
+                      >
+                        {showConfirmClaimPassword ? <Eye size={16} /> : <EyeOff size={16} />}
+                      </button>
+                    </span>
+                  </label>
+                </div>
+
                 <Button className="login-submit" type="submit" disabled={submitting}>
                   {submitting ? 'Mengaktifkan akun...' : 'Aktivasi & Masuk'}
-                  {!submitting && <ArrowUpRight size={18} />}
+                  {!submitting && <ArrowUpRight size={17} />}
                 </Button>
               </form>
             )}

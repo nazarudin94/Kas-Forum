@@ -6,16 +6,21 @@ import {
   CalendarCheck,
   Check,
   Copy,
+  Download,
   Eye,
   EyeOff,
   ExternalLink,
+  FileCheck,
+  FileCheck2,
   FileImage,
+  FileText,
   KeyRound,
   MessageCircle,
   Pencil,
   Phone,
   Plus,
   Power,
+  Printer,
   RefreshCw,
   Search,
   Shield,
@@ -28,6 +33,12 @@ import { Button, Card, EmptyState, LoadingState, MoneyInput, Notice, SectionTitl
 import { useAuth } from '../../auth/AuthContext'
 import { useResource } from '../../hooks/useResource'
 import { api, jsonBody } from '../../lib/api'
+import {
+  exportRondaScheduleCsv,
+  exportRondaSchedulePrint,
+  exportWargaListCsv,
+  exportWargaListPrint,
+} from '../../lib/export'
 import { formatCurrency, formatDate, formatNominalInput, parseNominalInput } from '../../lib/format'
 import { getProofSignedUrl, uploadPaymentProof } from '../../lib/storage'
 import { getSupabase } from '../../lib/supabase'
@@ -387,6 +398,7 @@ function WargaProfileContent({
   const [fullName, setFullName] = useState(profile.fullName)
   const [headName, setHeadName] = useState(profile.headName)
   const [occupancyStatus, setOccupancyStatus] = useState<HouseOccupancyStatus>(profile.occupancyStatus)
+  const [ownerPhone, setOwnerPhone] = useState(profile.ownerPhone ?? '')
   const [phone, setPhone] = useState(profile.phone ?? '')
   const [savingProfile, setSavingProfile] = useState(false)
   const [profileError, setProfileError] = useState<string | null>(null)
@@ -412,6 +424,7 @@ function WargaProfileContent({
           fullName: fullName.trim(),
           headName: headName.trim(),
           occupancyStatus,
+          ownerPhone: occupancyStatus === 'RENTED' ? ownerPhone.trim() || null : null,
           phone: phone.trim() || null,
         }),
       })
@@ -463,7 +476,11 @@ function WargaProfileContent({
             <strong>{profile.houseCode} · {profile.headName}</strong>
             <span>Blok {profile.blockCode} · Nomor {profile.houseNumber} · Username: {profile.username}</span>
             <span className="house-occupancy-label">
-              {profile.occupancyStatus === 'RENTED' ? 'Dikontrakan' : 'Dihuni pemilik'}
+              {profile.occupancyStatus === 'RENTED'
+                ? `Dikontrakan${profile.ownerPhone ? ` · Pemilik: ${profile.ownerPhone}` : ''}`
+                : profile.occupancyStatus === 'VACANT'
+                  ? 'Belum dihuni'
+                  : 'Dihuni pemilik'}
               {profile.phoneMasked ? ` · Telp/WA: ${profile.phoneMasked} (Terenkripsi)` : ''}
             </span>
           </div>
@@ -471,6 +488,50 @@ function WargaProfileContent({
             <small>Terdaftar {formatDate(profile.createdAt)}</small>
           </div>
         </div>
+      </Card>
+
+      <Card>
+        <SectionTitle
+          title="Status Berkas Administrasi (KTP & KK)"
+          description="Verifikasi berkas kependudukan resmi oleh Sekretaris lingkungan."
+        />
+        <div className="warga-doc-grid">
+          <div className={`warga-doc-item ${profile.ktpVerified ? 'warga-doc-item-verified' : ''}`}>
+            <span className="warga-doc-icon">
+              {profile.ktpVerified ? <FileCheck2 size={20} /> : <FileText size={20} />}
+            </span>
+            <div className="warga-doc-info">
+              <strong>KTP (Kartu Tanda Penduduk)</strong>
+              <span style={{ color: profile.ktpVerified ? '#15803d' : '#b45309' }}>
+                {profile.ktpVerified ? '✓ Sudah Diserahkan & Diverifikasi Sekretaris' : '⏳ Belum Diserahkan ke Sekretaris'}
+              </span>
+            </div>
+          </div>
+
+          <div className={`warga-doc-item ${profile.kkVerified ? 'warga-doc-item-verified' : ''}`}>
+            <span className="warga-doc-icon">
+              {profile.kkVerified ? <FileCheck2 size={20} /> : <FileText size={20} />}
+            </span>
+            <div className="warga-doc-info">
+              <strong>Kartu Keluarga (KK)</strong>
+              <span style={{ color: profile.kkVerified ? '#15803d' : '#b45309' }}>
+                {profile.kkVerified ? '✓ Sudah Diserahkan & Diverifikasi Sekretaris' : '⏳ Belum Diserahkan ke Sekretaris'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {(!profile.ktpVerified || !profile.kkVerified) && (
+          <div style={{ fontSize: '12px', color: '#713f12', marginTop: '12px', background: '#fefce8', padding: '9px 12px', borderRadius: '8px', border: '1px solid #fef08a' }}>
+            ℹ️ <b>Perhatian:</b> Berkas kependudukan Anda belum lengkap. Silakan serahkan fotokopi atau tunjukkan berkas KTP & Kartu Keluarga (KK) kepada Sekretaris atau pengurus blok.
+          </div>
+        )}
+
+        {profile.occupancyStatus === 'RENTED' && (
+          <div style={{ fontSize: '12px', color: '#1e3a8a', marginTop: '12px', background: '#eff6ff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+            📌 <b>Catatan Khusus Rumah Kontrakan:</b> Karena rumah berstatus dikontrakan, berkas KTP dan KK yang harus dilampirkan/diserahkan ke Sekretaris masing-masing <b>2 berkas</b> (1 berkas milik Pemilik Rumah dan 1 berkas milik Warga yang Mengontrak).
+          </div>
+        )}
       </Card>
 
       <Card>
@@ -518,8 +579,24 @@ function WargaProfileContent({
             >
               <option value="OWNER_OCCUPIED">Dihuni pemilik</option>
               <option value="RENTED">Dikontrakan</option>
+              <option value="VACANT">Belum dihuni</option>
             </select>
           </label>
+          {occupancyStatus === 'RENTED' && (
+            <label className="field field-wide">
+              <span>Nomor HP / WhatsApp Pemilik Rumah <small>(Yang Mengontrakkan)</small> <span style={{ color: '#dc2626' }}>*</span></span>
+              <input
+                type="tel"
+                maxLength={30}
+                placeholder="Contoh: 0812-3456-7890"
+                value={ownerPhone}
+                onChange={(event) => setOwnerPhone(event.target.value)}
+                disabled={!canUpdate || savingProfile}
+                required={occupancyStatus === 'RENTED'}
+              />
+              <small>Diisi oleh penghuni / yang punya rumah agar pengurus lingkungan dapat menghubungi pemilik unit.</small>
+            </label>
+          )}
           <label className="field">
             <span>No. WhatsApp / Telepon <small>(opsional)</small></span>
             <input
@@ -567,7 +644,7 @@ function WargaProfileContent({
                 onClick={() => setShowNewPassword((shown) => !shown)}
                 aria-label={showNewPassword ? 'Sembunyikan password baru' : 'Tampilkan password baru'}
               >
-                {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                {showNewPassword ? <Eye size={18} /> : <EyeOff size={18} />}
               </button>
             </span>
           </label>
@@ -589,7 +666,7 @@ function WargaProfileContent({
                 onClick={() => setShowConfirmPassword((shown) => !shown)}
                 aria-label={showConfirmPassword ? 'Sembunyikan konfirmasi password baru' : 'Tampilkan konfirmasi password baru'}
               >
-                {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                {showConfirmPassword ? <Eye size={18} /> : <EyeOff size={18} />}
               </button>
             </span>
           </label>
@@ -1372,16 +1449,28 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedBlock, setSelectedBlock] = useState('ALL')
+  const [selectedOccupancy, setSelectedOccupancy] = useState<string>('ALL')
+  const [selectedDocFilter, setSelectedDocFilter] = useState<string>('ALL')
+  const [verifyingHouse, setVerifyingHouse] = useState<HouseArrears | null>(null)
+  const verifyDocsDialog = useRef<HTMLDialogElement>(null)
 
   const rows = resource.data ?? []
 
   // Ambil daftar blok unik dari data rumah
   const availableBlocks = Array.from(new Set(rows.map((r) => r.blockCode).filter(Boolean))).sort()
 
-  // Filter data berdasarkan blok dan kata kunci pencarian (blok, nomor rumah, nama kepala keluarga, atau kode rumah)
+  // Filter data berdasarkan blok, status hunian, kelengkapan berkas, dan kata kunci pencarian
   const filteredRows = rows.filter((row) => {
     if (selectedBlock !== 'ALL' && row.blockCode !== selectedBlock) {
       return false
+    }
+    if (selectedOccupancy !== 'ALL' && row.occupancyStatus !== selectedOccupancy) {
+      return false
+    }
+    if (selectedDocFilter !== 'ALL') {
+      const isComplete = Boolean(row.ktpVerified && row.kkVerified)
+      if (selectedDocFilter === 'VERIFIED' && !isComplete) return false
+      if (selectedDocFilter === 'UNVERIFIED' && isComplete) return false
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim()
@@ -1465,27 +1554,41 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
     }
   }
 
-  async function copyClaimInvitation(house: HouseArrears) {
-    if (!house.claimCode) return
-    const claimLink = `${window.location.origin}/?mode=claim&house=${encodeURIComponent(house.houseCode)}&code=${encodeURIComponent(house.claimCode)}`
-    const text = `Halo warga rumah ${house.houseCode}, silakan aktivasi akun KasKita melalui tautan berikut:\n${claimLink}\n\nRumah: ${house.houseCode}\nKode Klaim: ${house.claimCode}`
-    try {
-      await navigator.clipboard.writeText(text)
-      setActionSuccess(`Pesan undangan WA rumah ${house.houseCode} berhasil disalin.`)
-      setActionError(null)
-    } catch {
-      setActionError(`Kode klaim ${house.houseCode}: ${house.claimCode} (salin manual).`)
-    }
-  }
-
   return (
     <Card>
       <SectionTitle
-        title="Rekap tagihan rumah"
-        description="Tagihan belum lunas atau masih menunggu verifikasi. Rumah yang dinonaktifkan tetap menyimpan riwayatnya."
+        title="Administrasi warga & rekap rumah"
+        description="Kelola data hunian, verifikasi berkas administrasi (KTP & KK), dan status tagihan kas."
         action={(
           <div className="arrears-heading-actions">
             <span className="tiny-count">{filteredRows.length} dari {rows.length} rumah</span>
+            {!compact && rows.length > 0 && (
+              <span className="tiny-count" style={{ color: '#15803d', background: '#dcfce7', borderColor: '#bbf7d0', fontWeight: 600 }}>
+                ✓ {rows.filter((r) => r.ktpVerified && r.kkVerified).length} Berkas Lengkap
+              </span>
+            )}
+            {!compact && filteredRows.length > 0 && (
+              <>
+                <Button
+                  className="button-small"
+                  type="button"
+                  variant="secondary"
+                  onClick={() => exportWargaListPrint(filteredRows)}
+                  title="Cetak atau simpan daftar warga sebagai PDF"
+                >
+                  <Printer size={14} /> Unduh PDF
+                </Button>
+                <Button
+                  className="button-small"
+                  type="button"
+                  variant="secondary"
+                  onClick={() => exportWargaListCsv(filteredRows)}
+                  title="Unduh daftar warga format Excel / CSV"
+                >
+                  <Download size={14} /> Unduh CSV
+                </Button>
+              </>
+            )}
             {canCreate && (
               <Button className="button-small" type="button" onClick={() => openHouseForm()}>
                 <Plus size={15} /> Tambah rumah
@@ -1578,6 +1681,49 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
               </select>
             </div>
           )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '11px', color: '#687e72', fontWeight: 600 }}>Status Hunian:</span>
+            <select
+              value={selectedOccupancy}
+              onChange={(e) => setSelectedOccupancy(e.target.value)}
+              style={{
+                height: '34px',
+                fontSize: '12px',
+                borderRadius: '8px',
+                border: '1px solid #ccd8d1',
+                background: '#ffffff',
+                padding: '0 8px',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="ALL">Semua Hunian</option>
+              <option value="OWNER_OCCUPIED">Dihuni Pemilik</option>
+              <option value="RENTED">Dikontrakan</option>
+              <option value="VACANT">Belum Dihuni</option>
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '11px', color: '#687e72', fontWeight: 600 }}>Berkas KTP/KK:</span>
+            <select
+              value={selectedDocFilter}
+              onChange={(e) => setSelectedDocFilter(e.target.value)}
+              style={{
+                height: '34px',
+                fontSize: '12px',
+                borderRadius: '8px',
+                border: '1px solid #ccd8d1',
+                background: '#ffffff',
+                padding: '0 8px',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="ALL">Semua Berkas</option>
+              <option value="UNVERIFIED">Belum Lengkap</option>
+              <option value="VERIFIED">Lengkap (KTP & KK)</option>
+            </select>
+          </div>
         </div>
       )}
 
@@ -1586,7 +1732,7 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
       ) : !visibleRows.length ? (
         <EmptyState
           title="Tidak ada rumah yang cocok"
-          description={`Tidak ditemukan rumah dengan pencarian "${searchQuery}"${selectedBlock !== 'ALL' ? ` di Blok ${selectedBlock}` : ''}.`}
+          description={`Tidak ditemukan rumah dengan kriteria filter/pencarian yang dipilih.`}
         />
       ) : (
         <div className="arrears-list">
@@ -1597,8 +1743,25 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
                 <strong>{row.houseCode}</strong>
                 <span>{row.headName}</span>
                 <span className="house-occupancy-label">
-                  {row.occupancyStatus === 'RENTED' ? 'Dikontrakan' : 'Dihuni pemilik'}
+                  {row.occupancyStatus === 'RENTED'
+                    ? 'Dikontrakan'
+                    : row.occupancyStatus === 'VACANT'
+                      ? 'Belum dihuni'
+                      : 'Dihuni pemilik'}
                   {row.hasAccount && !row.claimCode ? ' · Akun aktif' : ''}
+                </span>
+                {!compact && row.occupancyStatus === 'RENTED' && row.ownerPhone && (
+                  <span className="house-owner-badge" title="Kontak pemilik/yang mengontrakkan">
+                    Pemilik: <a href={`https://wa.me/${row.ownerPhone.replace(/[^0-9]/g, '').replace(/^0/, '62')}`} target="_blank" rel="noreferrer" className="wa-link">{row.ownerPhone}</a>
+                  </span>
+                )}
+                <span style={{ display: 'inline-flex', gap: '4px', flexWrap: 'wrap', marginTop: '2px' }}>
+                  <span className={`doc-badge ${row.ktpVerified ? 'doc-badge-verified' : 'doc-badge-pending'}`} title={row.ktpVerified ? 'KTP sudah diverifikasi Sekretaris' : 'KTP belum diserahkan'}>
+                    KTP {row.ktpVerified ? '✓' : '—'}
+                  </span>
+                  <span className={`doc-badge ${row.kkVerified ? 'doc-badge-verified' : 'doc-badge-pending'}`} title={row.kkVerified ? 'KK sudah diverifikasi Sekretaris' : 'KK belum diserahkan'}>
+                    KK {row.kkVerified ? '✓' : '—'}
+                  </span>
                 </span>
                 {!compact && (row.phone || row.phoneMasked) && (
                   <span className="house-contact-badge">
@@ -1630,29 +1793,33 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
               </strong>
               {(canUpdate || canDelete) && (
                 <div className="arrears-actions">
+                  {canUpdate && row.isActive && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="button-small"
+                      onClick={() => {
+                        setVerifyingHouse(row)
+                        verifyDocsDialog.current?.showModal()
+                      }}
+                      aria-label={`Verifikasi berkas KTP & KK ${row.houseCode}`}
+                      disabled={updatingHouseId !== null}
+                      title="Verifikasi penyerahan berkas administrasi kependudukan (KTP & KK)"
+                    >
+                      <FileCheck size={14} /> Berkas
+                    </Button>
+                  )}
                   {row.claimCode && (
-                    <>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="button-small"
-                        onClick={() => void copyPureClaimCode(row)}
-                        aria-label={`Salin kode klaim ${row.houseCode}`}
-                        disabled={updatingHouseId !== null}
-                      >
-                        <Copy size={14} /> Salin kode
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="button-small"
-                        onClick={() => void copyClaimInvitation(row)}
-                        aria-label={`Salin pesan undangan WA ${row.houseCode}`}
-                        disabled={updatingHouseId !== null}
-                      >
-                        Salin WA
-                      </Button>
-                    </>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="button-small"
+                      onClick={() => void copyPureClaimCode(row)}
+                      aria-label={`Salin kode klaim ${row.houseCode}`}
+                      disabled={updatingHouseId !== null}
+                    >
+                      <Copy size={14} /> Salin kode
+                    </Button>
                   )}
                   {canUpdate && row.isActive && (
                     <Button
@@ -1738,6 +1905,42 @@ function ArrearsPanel({ compact = false }: { compact?: boolean }) {
           onCancel={() => houseDialog.current?.close()}
         />
       </dialog>
+      <dialog className="rbac-modal" ref={verifyDocsDialog} aria-labelledby="verify-docs-title">
+        <div className="rbac-modal-head">
+          <div>
+            <h2 id="verify-docs-title">Verifikasi Berkas Kependudukan</h2>
+            <p>Konfirmasi berkas KTP dan KK yang telah diserahkan warga ke Sekretaris.</p>
+          </div>
+          <button
+            className="rbac-modal-close"
+            type="button"
+            aria-label="Tutup form verifikasi berkas"
+            onClick={() => {
+              verifyDocsDialog.current?.close()
+              setVerifyingHouse(null)
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        {verifyingHouse && (
+          <VerifyDocsForm
+            key={verifyingHouse.houseId}
+            house={verifyingHouse}
+            onSaved={async (message) => {
+              verifyDocsDialog.current?.close()
+              setVerifyingHouse(null)
+              setActionSuccess(message)
+              setActionError(null)
+              await resource.reload()
+            }}
+            onCancel={() => {
+              verifyDocsDialog.current?.close()
+              setVerifyingHouse(null)
+            }}
+          />
+        )}
+      </dialog>
     </Card>
   )
 }
@@ -1757,14 +1960,15 @@ function HouseRecordForm({
   const [occupancyStatus, setOccupancyStatus] = useState<HouseOccupancyStatus>(
     house?.occupancyStatus ?? 'OWNER_OCCUPIED',
   )
+  const [ownerPhone, setOwnerPhone] = useState(house?.ownerPhone ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const previewHouseCode = `${blockCode.trim().toUpperCase()}-${houseNumber.trim().toUpperCase()}`
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSubmitting(true)
     setError(null)
+    setSubmitting(true)
     try {
       const { error: saveError } = await getSupabase().rpc('save_house_record', {
         requested_house_id: house?.houseId ?? null,
@@ -1772,6 +1976,7 @@ function HouseRecordForm({
         requested_house_number: houseNumber,
         requested_head_name: headName,
         requested_occupancy_status: occupancyStatus,
+        requested_owner_phone: occupancyStatus === 'RENTED' ? ownerPhone.trim() || null : null,
       })
       if (saveError) throw saveError
       await onSaved(`Data rumah ${previewHouseCode} berhasil ${house ? 'diperbarui' : 'ditambahkan'}.`)
@@ -1828,12 +2033,135 @@ function HouseRecordForm({
           >
             <option value="OWNER_OCCUPIED">Dihuni pemilik</option>
             <option value="RENTED">Dikontrakan</option>
+            <option value="VACANT">Belum dihuni</option>
           </select>
         </label>
+        {occupancyStatus === 'RENTED' && (
+          <label className="field field-wide">
+            <span>Nomor Telepon / WhatsApp Pemilik Rumah <small>(opsional — diisi pemilik/penghuni)</small></span>
+            <input
+              type="tel"
+              maxLength={30}
+              placeholder="Contoh: 0812-3456-7890 (bisa dikosongkan pengurus)"
+              value={ownerPhone}
+              onChange={(event) => setOwnerPhone(event.target.value)}
+            />
+            <small>Pengurus dapat mengosongkan ini jika belum diketahui; pemilik rumah atau warga yang mengontrak dapat melengkapinya melalui menu profil akun.</small>
+          </label>
+        )}
       </div>
       <div className="form-actions">
         <Button className="button-small" type="submit" disabled={submitting}>
           {submitting ? 'Menyimpan...' : house ? 'Simpan perubahan' : 'Tambah rumah'}
+        </Button>
+        <Button className="button-small" type="button" variant="secondary" onClick={onCancel} disabled={submitting}>
+          Batal
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function VerifyDocsForm({
+  house,
+  onSaved,
+  onCancel,
+}: {
+  house: HouseArrears
+  onSaved: (message: string) => Promise<void>
+  onCancel: () => void
+}) {
+  const [ktpVerified, setKtpVerified] = useState(Boolean(house.ktpVerified))
+  const [kkVerified, setKkVerified] = useState(Boolean(house.kkVerified))
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSubmitting(true)
+    setError(null)
+    try {
+      await api('/api/sekretaris/warga/verify-docs', {
+        method: 'POST',
+        body: jsonBody({
+          wargaId: house.wargaId ?? null,
+          houseId: house.houseId,
+          ktpVerified,
+          kkVerified,
+        }),
+      })
+      await onSaved(`Status berkas kependudukan untuk rumah ${house.houseCode} (${house.headName}) berhasil diperbarui.`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Gagal memperbarui verifikasi berkas.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <form className="rbac-create-form" onSubmit={(event) => void submit(event)}>
+      {error && <Notice>{error}</Notice>}
+      <div style={{ marginBottom: '14px', padding: '10px 12px', background: '#f8faf9', borderRadius: '8px', border: '1px solid #e2e8e4' }}>
+        <div style={{ fontWeight: 600, fontSize: '14px', color: '#163326' }}>
+          {house.houseCode} · {house.headName}
+        </div>
+        <div style={{ fontSize: '12px', color: '#687e72', marginTop: '2px' }}>
+          Blok {house.blockCode} No. {house.houseNumber} · {house.occupancyStatus === 'RENTED' ? 'Dikontrakan' : house.occupancyStatus === 'VACANT' ? 'Belum dihuni' : 'Dihuni pemilik'}
+        </div>
+      </div>
+
+      {house.occupancyStatus === 'RENTED' && (
+        <div style={{ marginBottom: '14px', padding: '10px 12px', background: '#eff6ff', borderRadius: '8px', border: '1px solid #bfdbfe', fontSize: '12px', color: '#1e3a8a' }}>
+          <strong>ℹ️ Catatan Rumah Dikontrakan:</strong>
+          <div style={{ marginTop: '2px' }}>
+            Pastikan berkas KTP dan KK yang diserahkan/diverifikasi lengkap <b>2 berkas</b> (1 berkas milik Pemilik Rumah dan 1 berkas milik Warga yang Mengontrak).
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', padding: '10px 12px', border: '1px solid #d1ded7', borderRadius: '8px', background: ktpVerified ? '#f0fdf4' : '#ffffff' }}>
+          <input
+            type="checkbox"
+            checked={ktpVerified}
+            onChange={(e) => setKtpVerified(e.target.checked)}
+            style={{ marginTop: '3px', width: '18px', height: '18px', accentColor: '#1b4332', cursor: 'pointer' }}
+          />
+          <div>
+            <strong style={{ display: 'block', fontSize: '13px', color: '#163326' }}>
+              KTP (Kartu Tanda Penduduk) Sudah Diserahkan
+            </strong>
+            <span style={{ fontSize: '12px', color: '#687e72' }}>
+              Warga telah menyerahkan atau menunjukkan dokumen KTP yang sah kepada Sekretaris.
+            </span>
+          </div>
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', padding: '10px 12px', border: '1px solid #d1ded7', borderRadius: '8px', background: kkVerified ? '#f0fdf4' : '#ffffff' }}>
+          <input
+            type="checkbox"
+            checked={kkVerified}
+            onChange={(e) => setKkVerified(e.target.checked)}
+            style={{ marginTop: '3px', width: '18px', height: '18px', accentColor: '#1b4332', cursor: 'pointer' }}
+          />
+          <div>
+            <strong style={{ display: 'block', fontSize: '13px', color: '#163326' }}>
+              KK (Kartu Keluarga) Sudah Diserahkan
+            </strong>
+            <span style={{ fontSize: '12px', color: '#687e72' }}>
+              Warga telah menyerahkan atau menunjukkan dokumen Kartu Keluarga yang sah kepada Sekretaris.
+            </span>
+          </div>
+        </label>
+      </div>
+
+      <p style={{ fontSize: '11px', color: '#687e72', margin: '0 0 16px' }}>
+        💡 Status verifikasi berkas ini akan langsung tampil di akun warga pada profil/dashboard warga.
+      </p>
+
+      <div className="form-actions">
+        <Button className="button-small" type="submit" disabled={submitting}>
+          {submitting ? 'Menyimpan...' : 'Simpan Verifikasi Berkas'}
         </Button>
         <Button className="button-small" type="button" variant="secondary" onClick={onCancel} disabled={submitting}>
           Batal
@@ -2145,13 +2473,37 @@ export function RondaPanel({ readonly = false }: { readonly?: boolean }) {
         <SectionTitle
           title="Jadwal Ronda Lingkungan"
           description="Pembagian regu ronda malam (Malam Senin s.d. Malam Minggu) untuk menjaga keamanan lingkungan."
-          action={
-            canManage ? (
-              <Button className="button-small" type="button" onClick={() => openAddModal()}>
-                <Plus size={15} /> Tambah jadwal ronda
-              </Button>
-            ) : undefined
-          }
+          action={(
+            <div className="arrears-heading-actions">
+              {schedules.length > 0 && (
+                <>
+                  <Button
+                    className="button-small"
+                    type="button"
+                    variant="secondary"
+                    onClick={() => exportRondaSchedulePrint(filteredSchedules)}
+                    title="Cetak atau simpan jadwal ronda sebagai PDF"
+                  >
+                    <Printer size={14} /> Unduh PDF
+                  </Button>
+                  <Button
+                    className="button-small"
+                    type="button"
+                    variant="secondary"
+                    onClick={() => exportRondaScheduleCsv(filteredSchedules)}
+                    title="Unduh jadwal ronda format Excel / CSV"
+                  >
+                    <Download size={14} /> Unduh CSV
+                  </Button>
+                </>
+              )}
+              {canManage && (
+                <Button className="button-small" type="button" onClick={() => openAddModal()}>
+                  <Plus size={15} /> Tambah jadwal ronda
+                </Button>
+              )}
+            </div>
+          )}
         />
         {resource.error && <Notice>{resource.error}</Notice>}
         {error && <Notice>{error}</Notice>}

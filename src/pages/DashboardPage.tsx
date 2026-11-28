@@ -7,12 +7,14 @@ import {
   Boxes,
   CalendarCheck,
   ClipboardList,
+  Download,
   FileCheck2,
   HandCoins,
   LayoutDashboard,
   KeyRound,
   Leaf,
   LogOut,
+  Printer,
   ReceiptText,
   ShieldCheck,
   UserRound,
@@ -22,9 +24,11 @@ import type { LucideIcon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { Button, Card, LoadingState, Notice, SectionTitle } from '../components/UI'
+import { api } from '../lib/api'
+import { exportFinancialReportCsv, exportFinancialReportPrint } from '../lib/export'
 import { formatCurrency } from '../lib/format'
 import { useResource } from '../hooks/useResource'
-import type { Bill, FinanceSummary, Payment, User, UserRole } from '../types'
+import type { Bill, Expense, FinanceSummary, Payment, User, UserRole } from '../types'
 import {
   BendaharaWorkspace,
   KetuaWorkspace,
@@ -93,8 +97,8 @@ const roleDetails: Partial<Record<UserRole, { label: string; subtitle: string; n
     subtitle: 'Kelola jadwal ronda dan administrasi warga.',
     nav: [
       { id: 'overview', label: 'Ringkasan', icon: LayoutDashboard },
+      { id: 'arrears', label: 'Administrasi warga', icon: UsersRound },
       { id: 'ronda', label: 'Jadwal Ronda', icon: CalendarCheck },
-      { id: 'arrears', label: 'Rekap rumah', icon: UsersRound },
       { id: 'expenses', label: 'Pengeluaran', icon: ClipboardList },
     ],
   },
@@ -165,16 +169,63 @@ function SummaryCards({ summary }: { summary: FinanceSummary }) {
 }
 
 function FundHighlights({ summary, onlyActive = false }: { summary: FinanceSummary; onlyActive?: boolean }) {
+  const [exporting, setExporting] = useState<'pdf' | 'csv' | null>(null)
   const visibleFunds = onlyActive
     ? summary.funds.filter((fund) => fund.fund_status === 'ACTIVE')
     : summary.funds
+
+  async function handleExportFinance(mode: 'pdf' | 'csv') {
+    setExporting(mode)
+    let expenses: Expense[] = []
+    try {
+      expenses = await api<Expense[]>('/api/public/expenses')
+    } catch {
+      expenses = []
+    } finally {
+      setExporting(null)
+    }
+
+    const reportSummary: FinanceSummary = {
+      ...summary,
+      funds: visibleFunds,
+    }
+    if (mode === 'pdf') {
+      exportFinancialReportPrint(reportSummary, expenses)
+    } else {
+      exportFinancialReportCsv(reportSummary, expenses)
+    }
+  }
 
   return (
     <Card>
       <SectionTitle
         title="Pos keuangan"
         description="Ringkasan saldo per pos kas."
-        action={<span className="tiny-count">{visibleFunds.length} pos</span>}
+        action={(
+          <div className="arrears-heading-actions">
+            <span className="tiny-count">{visibleFunds.length} pos</span>
+            <Button
+              className="button-small"
+              type="button"
+              variant="secondary"
+              disabled={exporting !== null}
+              onClick={() => void handleExportFinance('pdf')}
+              title="Cetak atau simpan Laporan Keuangan sebagai PDF"
+            >
+              <Printer size={14} /> {exporting === 'pdf' ? 'Menyiapkan...' : 'Unduh PDF'}
+            </Button>
+            <Button
+              className="button-small"
+              type="button"
+              variant="secondary"
+              disabled={exporting !== null}
+              onClick={() => void handleExportFinance('csv')}
+              title="Unduh Laporan Keuangan format Excel / CSV"
+            >
+              <Download size={14} /> {exporting === 'csv' ? 'Menyiapkan...' : 'Unduh CSV'}
+            </Button>
+          </div>
+        )}
       />
       {visibleFunds.length === 0 ? (
         <div className="empty-inline">Belum ada pos keuangan.</div>
@@ -222,7 +273,7 @@ function DashboardOverview({
       </div>
       {role === 'WARGA' && <WargaRondaInfoCard />}
       <FundHighlights summary={summary} onlyActive={role === 'WARGA'} />
-      {role === 'KETUA' && <KetuaWorkspace tab="overview" />}
+      {(role === 'KETUA' || role === 'SEKRETARIS') && <KetuaWorkspace tab="overview" />}
     </div>
   )
 }

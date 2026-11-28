@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import { Eye, EyeOff, Plus, UserPlus, X } from 'lucide-react'
 import { Button, Card, EmptyState, LoadingState, Notice, SectionTitle } from '../../components/UI'
 import { useAuth } from '../../auth/AuthContext'
-import { getSupabase } from '../../lib/supabase'
+import { getSupabase, getSupabaseSchema } from '../../lib/supabase'
 
 type PermissionAction = 'can_view' | 'can_create' | 'can_update' | 'can_delete'
 
@@ -77,7 +77,13 @@ function initialDraft(roles: RbacRole[], menus: RbacMenu[], permissions: RoleMen
 }
 
 async function invokeAdminUserManagement(body: Record<string, unknown>) {
-  const { error } = await getSupabase().functions.invoke('admin-user-management', { body })
+  const schema = getSupabaseSchema()
+  const { error } = await getSupabase().functions.invoke('admin-user-management', {
+    body,
+    headers: {
+      'x-target-schema': schema,
+    },
+  })
   if (!error) return
 
   let message = error.message
@@ -189,19 +195,33 @@ export function RbacManagementPanel({ section }: { section: 'users' | 'role-menu
     setError(null)
     setSuccess(null)
     try {
-      const requestedPermissions = menus.map((menu) => ({
-        menu_id: menu.id,
-        ...draft[role.id][menu.id],
-      }))
+      const requestedPermissions = menus.map((menu) => {
+        const item = draft[role.id]?.[menu.id]
+        return {
+          menu_id: menu.id,
+          can_view: Boolean(item?.can_view),
+          can_create: Boolean(item?.can_create),
+          can_update: Boolean(item?.can_update),
+          can_delete: Boolean(item?.can_delete),
+        }
+      })
       const { error: saveError } = await getSupabase().rpc('save_role_menu_matrix', {
         requested_role_id: role.id,
         requested_permissions: requestedPermissions,
       })
-      if (saveError) throw saveError
-      setSuccess(`Permission untuk role ${role.name} berhasil disimpan.`)
+      if (saveError) {
+        throw new Error(saveError.message || saveError.details || saveError.hint || 'Gagal menyimpan permission role.')
+      }
+      setSuccess(`Permission untuk role ${role.name} berhasil disimpan. Pengguna dengan role ini perlu memuat ulang (refresh) halaman agar menu diperbarui.`)
       await loadData()
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Permission role gagal disimpan.')
+      const message =
+        reason instanceof Error
+          ? reason.message
+          : typeof reason === 'object' && reason !== null && 'message' in reason && typeof (reason as { message: unknown }).message === 'string'
+            ? (reason as { message: string }).message
+            : 'Permission role gagal disimpan.'
+      setError(message)
     } finally {
       setSavingRoleId(null)
     }
@@ -250,17 +270,34 @@ export function RbacManagementPanel({ section }: { section: 'users' | 'role-menu
           title="Permission per role"
           description="Aksi create, update, atau delete otomatis mengaktifkan akses view."
         />
-        {loading && roles.length === 0 ? <LoadingState /> : roles.map((role) => (
+        {loading && roles.length === 0 ? <LoadingState /> : roles.map((role) => {
+          const isRoleDirty = menus.some((menu) => {
+            const current = permissions.find((item) => item.role_id === role.id && item.menu_id === menu.id)
+            const d = draft[role.id]?.[menu.id]
+            if (!d) return false
+            return (
+              d.can_view !== (current?.can_view ?? false)
+              || d.can_create !== (current?.can_create ?? false)
+              || d.can_update !== (current?.can_update ?? false)
+              || d.can_delete !== (current?.can_delete ?? false)
+            )
+          })
+
+          return (
           <section className="rbac-matrix-section" key={role.id}>
             <div className="rbac-matrix-heading">
-              <div><h3>{role.name}</h3><span>{role.role_key}</span></div>
+              <div>
+                <h3>{role.name}</h3>
+                <span>{role.role_key}</span>
+                {isRoleDirty && <small style={{ color: '#d97706', marginLeft: 8, fontWeight: 600 }}>• Ada perubahan belum disimpan</small>}
+              </div>
               <Button
                 type="button"
-                variant="secondary"
+                variant={isRoleDirty ? 'primary' : 'secondary'}
                 disabled={savingRoleId !== null || loading}
                 onClick={() => void saveMatrix(role)}
               >
-                {savingRoleId === role.id ? 'Menyimpan...' : 'Simpan permission'}
+                {savingRoleId === role.id ? 'Menyimpan...' : isRoleDirty ? 'Simpan perubahan *' : 'Simpan permission'}
               </Button>
             </div>
             <div className="rbac-table-wrap">
@@ -303,7 +340,7 @@ export function RbacManagementPanel({ section }: { section: 'users' | 'role-menu
               </table>
             </div>
           </section>
-        ))}
+        )})}
       </Card>}
 
       {section === 'users' && <Card>
@@ -621,7 +658,7 @@ function NewUserForm({
               onClick={() => setShowPassword((shown) => !shown)}
               aria-label={showPassword ? 'Sembunyikan password sementara' : 'Tampilkan password sementara'}
             >
-              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              {showPassword ? <Eye size={18} /> : <EyeOff size={18} />}
             </button>
           </span>
         </label>
@@ -643,7 +680,7 @@ function NewUserForm({
               onClick={() => setShowConfirmPassword((shown) => !shown)}
               aria-label={showConfirmPassword ? 'Sembunyikan konfirmasi password' : 'Tampilkan konfirmasi password'}
             >
-              {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              {showConfirmPassword ? <Eye size={18} /> : <EyeOff size={18} />}
             </button>
           </span>
         </label>

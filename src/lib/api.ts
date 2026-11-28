@@ -1,4 +1,4 @@
-import { getSupabase } from './supabase'
+import { getSupabase, getSupabaseSchema } from './supabase'
 
 type Row = Record<string, any>
 
@@ -115,7 +115,12 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   }
 
   if (path === '/api/public/claim-house' && method === 'POST') {
-    const { data, error } = await supabase.functions.invoke('claim-warga-account', { body })
+    const { data, error } = await supabase.functions.invoke('claim-warga-account', {
+      body,
+      headers: {
+        'x-target-schema': getSupabaseSchema(),
+      },
+    })
     if (error) {
       let message = error.message
       if ('context' in error && error.context instanceof Response) {
@@ -139,7 +144,19 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   }
 
   if ((path === '/api/public/expenses' || path === '/api/ketua/expenses') && method === 'GET') {
-    const rows = unwrapRows(await supabase.from('v_public_expenses').select('*').order('expense_date', { ascending: false }))
+    const result = await supabase.from('v_public_expenses').select('*').order('expense_date', { ascending: false })
+    if (result.error) {
+      // Fallback query tabel expenses jika view belum ada di PostgREST schema cache
+      const fallback = await supabase
+        .from('expenses')
+        .select('id, fund_id, title, description, amount, expense_date, proof_url, status, created_at, finance_funds(name)')
+        .eq('status', 'APPROVED')
+        .order('expense_date', { ascending: false })
+      if (!fallback.error && fallback.data) {
+        return fallback.data.map((row) => mapExpense(row as Row)) as T
+      }
+    }
+    const rows = unwrapRows(result)
     return rows.map((row) => mapExpense(row as Row)) as T
   }
 
@@ -174,6 +191,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       requested_head_name: String(body.headName ?? ''),
       requested_occupancy_status: String(body.occupancyStatus ?? 'OWNER_OCCUPIED'),
       requested_phone: body.phone ? String(body.phone) : null,
+      requested_owner_phone: body.ownerPhone ? String(body.ownerPhone) : null,
     }))
     return { message: 'Profil berhasil diperbarui.' } as T
   }
@@ -324,27 +342,69 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   if (resetMatch && method === 'POST') {
     unwrap(await supabase.functions.invoke('reset-warga-password', {
       body: { userId: resetMatch[1] },
+      headers: {
+        'x-target-schema': getSupabaseSchema(),
+      },
     }))
     return { message: 'Password warga berhasil direset.' } as T
   }
 
   if (path === '/api/ketua/houses/arrears' && method === 'GET') {
-    const rows = unwrapRows(await supabase.from('v_house_arrears').select('*').order('house_code'))
-    return rows.map((row) => ({
-      houseId: Number(row.house_id),
-      houseCode: row.house_code,
-      blockCode: row.block_code,
-      houseNumber: row.house_number,
-      headName: row.head_name,
-      occupancyStatus: row.occupancy_status ?? 'OWNER_OCCUPIED',
-      isActive: row.is_active,
-      phoneMasked: row.phone_masked ?? null,
-      phone: row.phone ?? null,
-      claimCode: row.claim_code ?? null,
-      hasAccount: Boolean(row.has_account),
-      outstandingBillCount: Number(row.outstanding_bill_count),
-      outstandingAmount: row.outstanding_amount,
-    })) as T
+    const [arrearsRes, wargaRes] = await Promise.all([
+      supabase.from('v_house_arrears').select('*').order('house_code'),
+      supabase.from('warga').select('id, house_id, ktp_verified, kk_verified'),
+    ])
+    const rows = unwrapRows(arrearsRes)
+    const wargaMap = new Map<number, { ktpVerified: boolean; kkVerified: boolean }>()
+    if (wargaRes.data) {
+      for (const w of wargaRes.data) {
+        const item = {
+          ktpVerified: Boolean((w as Row).ktp_verified),
+          kkVerified: Boolean((w as Row).kk_verified),
+        }
+        wargaMap.set(Number(w.id), item)
+        if ((w as Row).house_id) {
+          wargaMap.set(Number((w as Row).house_id), item)
+        }
+      }
+    }
+
+    return rows.map((row) => {
+      const wById = row.warga_id ? wargaMap.get(Number(row.warga_id)) : null
+      const wByHouse = row.house_id ? wargaMap.get(Number(row.house_id)) : null
+      const ktpVerified = wById?.ktpVerified ?? wByHouse?.ktpVerified ?? Boolean(row.ktp_verified)
+      const kkVerified = wById?.kkVerified ?? wByHouse?.kkVerified ?? Boolean(row.kk_verified)
+
+      return {
+        houseId: Number(row.house_id),
+        houseCode: row.house_code,
+        blockCode: row.block_code,
+        houseNumber: row.house_number,
+        headName: row.head_name,
+        occupancyStatus: (row.occupancy_status ?? 'OWNER_OCCUPIED') as 'OWNER_OCCUPIED' | 'RENTED' | 'VACANT',
+        ownerPhone: row.owner_phone ?? null,
+        wargaId: row.warga_id ? Number(row.warga_id) : null,
+        ktpVerified,
+        kkVerified,
+        isActive: row.is_active,
+        phoneMasked: row.phone_masked ?? null,
+        phone: row.phone ?? null,
+        claimCode: row.claim_code ?? null,
+        hasAccount: Boolean(row.has_account),
+        outstandingBillCount: Number(row.outstanding_bill_count),
+        outstandingAmount: row.outstanding_amount,
+      }
+    }) as T
+  }
+
+  if (path === '/api/sekretaris/warga/verify-docs' && method === 'POST') {
+    unwrap(await supabase.rpc('set_warga_doc_verification', {
+      requested_warga_id: body.wargaId ? Number(body.wargaId) : null,
+      requested_ktp_verified: Boolean(body.ktpVerified),
+      requested_kk_verified: Boolean(body.kkVerified),
+      requested_house_id: body.houseId ? Number(body.houseId) : null,
+    }))
+    return { message: 'Status verifikasi berkas administrasi berhasil diperbarui.' } as T
   }
 
   if (path === '/api/ketua/verification-log' && method === 'GET') {

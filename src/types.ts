@@ -121,7 +121,7 @@ export interface Expense {
   createdAt: string
 }
 
-export type HouseOccupancyStatus = 'OWNER_OCCUPIED' | 'RENTED'
+export type HouseOccupancyStatus = 'OWNER_OCCUPIED' | 'RENTED' | 'VACANT'
 
 export interface HouseArrears {
   houseId: number
@@ -130,6 +130,10 @@ export interface HouseArrears {
   houseNumber: string
   headName: string
   occupancyStatus: HouseOccupancyStatus
+  ownerPhone?: string | null
+  wargaId?: number | null
+  ktpVerified?: boolean
+  kkVerified?: boolean
   isActive: boolean
   phoneMasked?: string | null
   phone?: string | null
@@ -168,6 +172,9 @@ export interface WargaProfile {
   houseNumber: string
   headName: string
   occupancyStatus: HouseOccupancyStatus
+  ownerPhone?: string | null
+  ktpVerified?: boolean
+  kkVerified?: boolean
   phone: string | null
   phoneMasked?: string | null
   createdAt: string
