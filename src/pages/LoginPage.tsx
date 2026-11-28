@@ -216,10 +216,10 @@ export function LoginPage() {
               Rapi untuk pengurus, jelas untuk semua warga.
             </p>
           </div>
-          <div className="story-foot">
+          {/* <div className="story-foot">
             <ShieldCheck size={17} />
             <span>Data pribadi warga tetap terlindungi</span>
-          </div>
+          </div> */}
         </section>
 
         <section className="login-side">
@@ -576,8 +576,8 @@ export function LoginPage() {
             </div>
           </div>
           <footer className="login-footer">
-            <span>KasKita · Transparan bersama</span>
-            <span>Butuh bantuan? Hubungi pengurus blok</span>
+            <span>KasKita v1 · Dibuat oleh suntree.dev</span>
+            <span>Butuh bantuan? Hubungi pengurus blok F & B</span>
           </footer>
         </section>
       </div>

@@ -39,9 +39,6 @@ function SplashLoader() {
       <div style={{ marginTop: '14px', fontSize: '26px', fontWeight: 800, letterSpacing: '-0.8px' }}>
         kaskita<span style={{ color: '#a7d870' }}>.</span>
       </div>
-      <div style={{ marginTop: '4px', fontSize: '10px', fontWeight: 700, letterSpacing: '1.6px', color: '#b7cfbf' }}>
-        KAS BLOK TRANSPARAN
-      </div>
     </div>
   )
 }

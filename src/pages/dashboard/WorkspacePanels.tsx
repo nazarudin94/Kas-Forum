@@ -9,7 +9,6 @@ import {
   Download,
   Eye,
   EyeOff,
-  ExternalLink,
   FileCheck,
   FileCheck2,
   FileImage,
@@ -774,10 +773,12 @@ function PaymentReviewCard({
   const [busy, setBusy] = useState(false)
   const [signedProofUrl, setSignedProofUrl] = useState<string | null>(null)
   const [loadingProof, setLoadingProof] = useState(false)
+  const [showPreviewModal, setShowPreviewModal] = useState(false)
 
   useEffect(() => {
     let active = true
     if (payment.proofUrl) {
+      setLoadingProof(true)
       getProofSignedUrl(payment.proofUrl)
         .then((url) => {
           if (active) setSignedProofUrl(url)
@@ -829,9 +830,45 @@ function PaymentReviewCard({
       {loadingProof ? (
         <p style={{ margin: '12px 0 0', fontSize: '11px', color: '#6d7d74' }}>Memuat tautan bukti aman...</p>
       ) : signedProofUrl ? (
-        <a className="proof-link" href={signedProofUrl} target="_blank" rel="noreferrer">
-          <FileImage size={16} /> Lihat foto bukti pembayaran <ExternalLink size={14} />
-        </a>
+        <>
+          <button
+            type="button"
+            className="proof-link"
+            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}
+            onClick={() => setShowPreviewModal(true)}
+          >
+            <FileImage size={16} /> Lihat foto bukti pembayaran
+          </button>
+          {showPreviewModal && (
+            <dialog className="rbac-modal" open style={{ zIndex: 120 }}>
+              <div className="rbac-modal-backdrop" onClick={() => setShowPreviewModal(false)} />
+              <div className="rbac-modal-dialog" style={{ maxWidth: '480px', width: '90%' }}>
+                <div className="rbac-modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ margin: 0, fontSize: '15px' }}>Bukti Pembayaran · {payment.houseCode ?? 'Kas umum'}</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowPreviewModal(false)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#666', padding: '4px' }}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                <div style={{ marginTop: '14px', textAlign: 'center', background: '#0b1612', borderRadius: '10px', padding: '10px' }}>
+                  <img
+                    src={signedProofUrl}
+                    alt="Bukti pembayaran"
+                    style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '6px' }}
+                  />
+                </div>
+                <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button type="button" variant="ghost" onClick={() => setShowPreviewModal(false)}>
+                    Tutup
+                  </Button>
+                </div>
+              </div>
+            </dialog>
+          )}
+        </>
       ) : <p className="missing-proof">Bukti pembayaran tidak dilampirkan atau tidak ditemukan.</p>}
       {error && <Notice>{error}</Notice>}
       <div className="review-actions">
@@ -1132,15 +1169,41 @@ function FundsPanel({ onFinanceChange }: { onFinanceChange: () => Promise<void> 
 function BendaharaExpensePanel({ onFinanceChange }: { onFinanceChange: () => Promise<void> }) {
   const expensesResource = useResource<Expense[]>('/api/bendahara/expenses')
   const fundsResource = useResource<FinanceFund[]>('/api/bendahara/funds')
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [fundId, setFundId] = useState('')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
   const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().slice(0, 10))
-  const [proofUrl, setProofUrl] = useState('')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) {
+      clearSelectedFile()
+      return
+    }
+    if (!file.type.startsWith('image/')) {
+      setError('Hanya berkas gambar (JPG, PNG, WebP) yang diperbolehkan.')
+      return
+    }
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    setSelectedFile(file)
+    setPreviewUrl(URL.createObjectURL(file))
+    setError(null)
+  }
+
+  function clearSelectedFile() {
+    setSelectedFile(null)
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    setPreviewUrl(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -1153,6 +1216,13 @@ function BendaharaExpensePanel({ onFinanceChange }: { onFinanceChange: () => Pro
     setError(null)
     setSuccess(null)
     try {
+      let uploadedProofUrl: string | undefined
+      if (selectedFile) {
+        setUploadProgress('Mengompresi & mengunggah nota...')
+        uploadedProofUrl = await uploadPaymentProof(selectedFile)
+      }
+
+      setUploadProgress('Menyimpan transaksi...')
       await api('/api/bendahara/expenses', {
         method: 'POST',
         body: jsonBody({
@@ -1161,19 +1231,20 @@ function BendaharaExpensePanel({ onFinanceChange }: { onFinanceChange: () => Pro
           amount: numericAmount,
           expenseDate,
           ...(description.trim() ? { description: description.trim() } : {}),
-          ...(proofUrl.trim() ? { proofUrl: proofUrl.trim() } : {}),
+          ...(uploadedProofUrl ? { proofUrl: uploadedProofUrl } : {}),
         }),
       })
       setTitle('')
       setDescription('')
       setAmount('')
-      setProofUrl('')
-      setSuccess('Pengeluaran tercatat dan masuk ke saldo resmi.')
+      clearSelectedFile()
+      setSuccess('Pengeluaran dan nota bukti berhasil disimpan ke saldo resmi.')
       await Promise.all([expensesResource.reload(), onFinanceChange()])
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Pengeluaran gagal disimpan.')
     } finally {
       setBusy(false)
+      setUploadProgress(null)
     }
   }
 
@@ -1206,17 +1277,56 @@ function BendaharaExpensePanel({ onFinanceChange }: { onFinanceChange: () => Pro
             <span>Nominal (Rp)</span>
             <MoneyInput value={amount} onValueChange={setAmount} required />
           </label>
-          <label className="field">
-            <span>Tautan nota <small>(opsional)</small></span>
-            <input maxLength={255} value={proofUrl} onChange={(event) => setProofUrl(event.target.value)} placeholder="/uploads/nota.webp" />
-          </label>
+          <div className="field">
+            <span>Foto bukti nota <small>(opsional)</small></span>
+            <div className="proof-upload-zone" style={{ marginTop: '4px' }}>
+              {!selectedFile ? (
+                <div>
+                  <label className="button button-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', padding: '6px 10px' }}>
+                    <Upload size={14} /> Pilih foto nota / kuitansi
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      style={{ display: 'none' }}
+                      onChange={handleFileChange}
+                      disabled={busy}
+                    />
+                  </label>
+                  <p style={{ margin: '4px 0 0', fontSize: '10px', color: '#6d7d74' }}>
+                    JPG, PNG, atau WebP (otomatis dikompresi).
+                  </p>
+                </div>
+              ) : (
+                <div className="proof-preview-wrapper" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {previewUrl && (
+                    <img src={previewUrl} alt="Pratinjau nota" style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '6px' }} />
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <strong style={{ fontSize: '11px', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {selectedFile.name}
+                    </strong>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={clearSelectedFile}
+                      disabled={busy}
+                      style={{ padding: 0, height: 'auto', fontSize: '10px', color: '#a2483e' }}
+                    >
+                      <X size={12} /> Hapus foto
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
           <label className="field field-wide">
             <span>Keterangan <small>(opsional)</small></span>
             <textarea rows={3} value={description} onChange={(event) => setDescription(event.target.value)} />
           </label>
           <div className="field-wide form-actions">
             <Button type="submit" disabled={busy || !(fundsResource.data?.length)}>
-              {busy ? 'Menyimpan...' : 'Simpan pengeluaran'}
+              {busy ? (uploadProgress ?? 'Menyimpan...') : 'Simpan pengeluaran'}
               <ArrowDownLeft size={17} />
             </Button>
           </div>
@@ -1234,6 +1344,7 @@ function ReadonlyExpensePanel({ endpoint }: { endpoint: string }) {
 
 function ExpenseItemRow({ expense }: { expense: Expense }) {
   const [signedUrl, setSignedUrl] = useState<string | null>(null)
+  const [showModal, setShowModal] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -1256,9 +1367,45 @@ function ExpenseItemRow({ expense }: { expense: Expense }) {
         <span>{expense.fundName} · {formatDate(expense.expenseDate)}</span>
         {expense.description && <small>{expense.description}</small>}
         {signedUrl && (
-          <a className="inline-proof" href={signedUrl} target="_blank" rel="noreferrer">
-            <FileImage size={14} /> Lihat bukti nota <ExternalLink size={13} />
-          </a>
+          <>
+            <button
+              type="button"
+              className="inline-proof"
+              style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}
+              onClick={() => setShowModal(true)}
+            >
+              <FileImage size={14} /> Lihat bukti nota
+            </button>
+            {showModal && (
+              <dialog className="rbac-modal" open style={{ zIndex: 120 }}>
+                <div className="rbac-modal-backdrop" onClick={() => setShowModal(false)} />
+                <div className="rbac-modal-dialog" style={{ maxWidth: '480px', width: '90%' }}>
+                  <div className="rbac-modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0, fontSize: '15px' }}>Bukti Nota · {expense.title}</h3>
+                    <button
+                      type="button"
+                      onClick={() => setShowModal(false)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#666', padding: '4px' }}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div style={{ marginTop: '14px', textAlign: 'center', background: '#0b1612', borderRadius: '10px', padding: '10px' }}>
+                    <img
+                      src={signedUrl}
+                      alt="Bukti nota pengeluaran"
+                      style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '6px' }}
+                    />
+                  </div>
+                  <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button type="button" variant="ghost" onClick={() => setShowModal(false)}>
+                      Tutup
+                    </Button>
+                  </div>
+                </div>
+              </dialog>
+            )}
+          </>
         )}
       </div>
       <div className="expense-value">
@@ -2540,9 +2687,12 @@ const RONDA_DAYS: { key: RondaDayKey; label: string }[] = [
 ]
 
 function getTodayRondaDayKey(): RondaDayKey {
-  // Malam ronda: misal hari Minggu malam dihitung Malam Senin (atau hari kalender saat ini)
-  const dayIndex = new Date().getDay() // 0: Minggu, 1: Senin, 2: Selasa, ... 6: Sabtu
-  switch (dayIndex) {
+  // Pergantian jadwal ronda harian dimulai pukul 06:00 pagi:
+  // - Pukul 00:00 - 05:59 dini hari masih menampilkan regu malam yang sedang bertugas
+  // - Mulai pukul 06:00 pagi menampilkan regu ronda untuk nanti malam (contoh: Sabtu pagi sampai malam = Malam Minggu)
+  const now = new Date()
+  const targetDay = now.getHours() < 6 ? now.getDay() : (now.getDay() + 1) % 7
+  switch (targetDay) {
     case 1: return 'SENIN'
     case 2: return 'SELASA'
     case 3: return 'RABU'

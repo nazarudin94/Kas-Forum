@@ -411,7 +411,7 @@ export function DashboardPage() {
           </nav>
           <div className="sidebar-foot">
             <span className="sidebar-foot-icon"><Bell size={16} /></span>
-            <span><b>Perlu bantuan?</b><small>Hubungi pengurus blok.</small></span>
+            <span><b>KasKita v1</b><small>Dibuat oleh suntree.dev</small></span>
           </div>
         </aside>
 
@@ -476,6 +476,11 @@ export function DashboardPage() {
           {isCustomRole && activeTab !== 'ronda' && isKetuaTab(activeTab) && <KetuaWorkspace tab={activeTab} />}
           {role === 'ADMIN' && activeTab === 'rbac' && <RbacManagementPanel section="users" />}
           {role === 'ADMIN' && activeTab === 'role_menu' && <RbacManagementPanel section="role-menu" />}
+
+          <footer style={{ marginTop: '48px', paddingTop: '16px', borderTop: '1px solid #e7ece5', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#88988e' }}>
+            <span>KasKita v1 · Sistem Manajemen Kas & Lingkungan Blok F & B</span>
+            {/* <span>Dibuat oleh suntree.dev</span> */}
+          </footer>
         </main>
       </div>
     </div>
