@@ -1,4 +1,7 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { App as CapacitorApp } from '@capacitor/app'
+import { Capacitor } from '@capacitor/core'
 import { AuthProvider } from './auth/AuthProvider'
 import { useAuth } from './auth/AuthContext'
 import { DashboardPage } from './pages/DashboardPage'
@@ -39,6 +42,33 @@ function AppRoutes() {
 }
 
 function App() {
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+
+    let listenerHandle: { remove: () => Promise<void> } | undefined
+    void CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      // 1. Jika ada dialog/modal HTML5 yang sedang terbuka, tutup dialog lebih dulu
+      const openDialog = document.querySelector('dialog[open]') as HTMLDialogElement | null
+      if (openDialog) {
+        openDialog.close()
+        return
+      }
+      // 2. Jika histori halaman bisa kembali, navigasi mundur
+      if (canGoBack) {
+        window.history.back()
+        return
+      }
+      // 3. Jika sudah di halaman utama, keluar dari aplikasi
+      void CapacitorApp.exitApp()
+    }).then((handle) => {
+      listenerHandle = handle
+    })
+
+    return () => {
+      if (listenerHandle) void listenerHandle.remove()
+    }
+  }, [])
+
   return (
     <BrowserRouter>
       <AuthProvider>
