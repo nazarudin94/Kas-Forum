@@ -4,7 +4,19 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 let client: SupabaseClient | undefined
 
 export function getSupabaseSchema(): string {
-  return import.meta.env.VITE_SUPABASE_SCHEMA || (import.meta.env.DEV ? 'dev' : 'public')
+  // Kunci paksa: di production build ATAU domain selain localhost/127.0.0.1,
+  // selalu gunakan schema 'public' agar tidak mungkin bocor ke 'dev'
+  // meskipun VITE_SUPABASE_SCHEMA=dev ada di .env.local atau Vercel Environment Variables.
+  if (import.meta.env.PROD) {
+    return 'public'
+  }
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname
+    if (host !== 'localhost' && host !== '127.0.0.1') {
+      return 'public'
+    }
+  }
+  return import.meta.env.VITE_SUPABASE_SCHEMA?.trim() || 'dev'
 }
 
 export function getSupabase(): SupabaseClient {
