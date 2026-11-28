@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "cap:icons": "powershell -ExecutionPolicy Bypass -File scripts/generate-android-icons.ps1",
     "cap:sync": "npm run build && npx cap sync android",
+    "cap:apk": "powershell -ExecutionPolicy Bypass -File scripts/build-apk.ps1",
     "cap:open": "npx cap open android"
   },
   "dependencies": {

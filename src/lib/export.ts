@@ -1,17 +1,13 @@
-import { Capacitor } from '@capacitor/core'
+import { Capacitor, registerPlugin } from '@capacitor/core'
 import type { Expense, FinanceSummary, HouseArrears, RondaSchedule, User } from '../types'
 import { formatCurrency, formatDate } from './format'
 
-interface KasKitaAndroidPrintBridge {
-  printHtml?: (title: string, html: string) => void
-  shareCsv?: (filename: string, csvContent: string) => void
+interface KasKitaPrintPlugin {
+  printHtml(options: { title: string; html: string }): Promise<void>
+  shareCsv(options: { filename: string; csvContent: string }): Promise<void>
 }
 
-declare global {
-  interface Window {
-    KasKitaAndroidPrint?: KasKitaAndroidPrintBridge
-  }
-}
+const KasKitaPrint = registerPlugin<KasKitaPrintPlugin>('KasKitaPrint')
 
 /**
  * Mengecek apakah pengguna saat ini memiliki hak akses RBAC untuk mengunduh laporan (PDF / CSV).
@@ -24,7 +20,7 @@ export function canExportDocuments(user: User | null | undefined): boolean {
 /**
  * Mengonversi array baris data menjadi file CSV dan mengunduhnya ke perangkat pengguna.
  * Dilengkapi UTF-8 BOM (\uFEFF) agar terbaca rapi di Microsoft Excel, serta dukungan
- * Native Share pada Android APK / perangkat mobile.
+ * Native Plugin & Web Share pada Android APK / perangkat mobile.
  */
 export function downloadCsv(filename: string, rows: (string | number | boolean | null | undefined)[][]): void {
   const safeFilename = filename.endsWith('.csv') ? filename : `${filename}.csv`
@@ -42,29 +38,25 @@ export function downloadCsv(filename: string, rows: (string | number | boolean |
 
   const fullCsv = '\uFEFF' + csvContent
 
-  // 1. Jika berjalan di dalam APK Android KasKita dengan native bridge
-  if (typeof window !== 'undefined' && typeof window.KasKitaAndroidPrint?.shareCsv === 'function') {
-    window.KasKitaAndroidPrint.shareCsv(safeFilename, fullCsv)
+  // 1. Jika berjalan di dalam APK Android KasKita: panggil plugin native FileProvider Share
+  if (Capacitor.isNativePlatform()) {
+    void KasKitaPrint.shareCsv({ filename: safeFilename, csvContent: fullCsv }).catch(async () => {
+      // Fallback jika pengguna masih memakai APK versi lama sebelum plugin dipasang
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        try {
+          const file = new File([fullCsv], safeFilename, { type: 'text/csv;charset=utf-8;' })
+          await navigator.share({ title: safeFilename, files: [file] })
+          return
+        } catch {
+          // Abaikan jika dibatalkan pengguna
+        }
+      }
+      alert('Untuk menyimpan CSV langsung dari aplikasi, silakan pasang (update) file KasKita.apk versi terbaru.')
+    })
     return
   }
 
-  // 2. Jika berjalan di Capacitor / Mobile WebView yang mendukung Web Share File API
-  if (Capacitor.isNativePlatform() && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-    try {
-      const file = new File([fullCsv], safeFilename, { type: 'text/csv;charset=utf-8;' })
-      if (!navigator.canShare || navigator.canShare({ files: [file] })) {
-        void navigator.share({
-          title: safeFilename,
-          files: [file],
-        })
-        return
-      }
-    } catch {
-      // Lanjut ke mekanisme anchor download standar
-    }
-  }
-
-  // 3. Browser standar (Desktop / Chrome Mobile)
+  // 2. Browser standar (Desktop / Chrome Mobile)
   const blob = new Blob([fullCsv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
@@ -420,12 +412,14 @@ export function printHtmlDocument(title: string, bodyHtml: string): void {
   })
 
   printBtn.addEventListener('click', () => {
-    // 1. Jika APK Android memiliki native PrintManager bridge
-    if (typeof window.KasKitaAndroidPrint?.printHtml === 'function') {
-      window.KasKitaAndroidPrint.printHtml(title, fullHtml)
+    // 1. Jika berjalan di dalam APK Android KasKita: panggil plugin native Android PrintManager ("Save as PDF")
+    if (Capacitor.isNativePlatform()) {
+      void KasKitaPrint.printHtml({ title, html: fullHtml }).catch(() => {
+        alert('Untuk mengaktifkan fitur Simpan PDF langsung dari aplikasi, silakan install ulang file KasKita.apk versi terbaru hasil npm run cap:apk.')
+      })
       return
     }
-    // 2. Cetak melalui iframe standar browser
+    // 2. Cetak melalui iframe standar pada browser Desktop / Mobile
     if (iframe.contentWindow) {
       iframe.contentWindow.focus()
       iframe.contentWindow.print()

@@ -396,6 +396,7 @@ function WargaProfileContent({
   onProfileSaved: () => Promise<void>
   onChangePassword: (password: string) => Promise<void>
 }) {
+  const editProfileDialog = useRef<HTMLDialogElement>(null)
   const [fullName, setFullName] = useState(profile.fullName)
   const [headName, setHeadName] = useState(profile.headName)
   const [occupancyStatus, setOccupancyStatus] = useState<HouseOccupancyStatus>(profile.occupancyStatus)
@@ -404,6 +405,16 @@ function WargaProfileContent({
   const [savingProfile, setSavingProfile] = useState(false)
   const [profileError, setProfileError] = useState<string | null>(null)
   const [profileSuccess, setProfileSuccess] = useState<string | null>(null)
+
+  function openEditProfileModal() {
+    setFullName(profile.fullName)
+    setHeadName(profile.headName)
+    setOccupancyStatus(profile.occupancyStatus)
+    setOwnerPhone(profile.ownerPhone ?? '')
+    setPhone(profile.phone ?? '')
+    setProfileError(null)
+    editProfileDialog.current?.showModal()
+  }
 
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -430,6 +441,7 @@ function WargaProfileContent({
         }),
       })
       await onProfileSaved()
+      editProfileDialog.current?.close()
       setProfileSuccess('Profil dan data hunian berhasil diperbarui.')
     } catch (reason) {
       setProfileError(reason instanceof Error ? reason.message : 'Profil gagal diperbarui.')
@@ -469,20 +481,35 @@ function WargaProfileContent({
         <SectionTitle
           title="Informasi rumah & akun"
           description="Identitas unit rumah yang terhubung dengan akun Anda."
-          action={<span className="tiny-count">Rumah {profile.houseCode}</span>}
+          action={(
+            <div className="arrears-heading-actions">
+              <span className="tiny-count">Rumah {profile.houseCode}</span>
+              {canUpdate && (
+                <Button
+                  className="button-small"
+                  type="button"
+                  variant="secondary"
+                  onClick={openEditProfileModal}
+                >
+                  <Pencil size={14} /> Perbarui data profil
+                </Button>
+              )}
+            </div>
+          )}
         />
+        {profileSuccess && <Notice variant="success">{profileSuccess}</Notice>}
         <div className="arrears-row">
           <span className="house-avatar">{profile.houseCode.slice(0, 1)}</span>
           <div className="arrears-house">
             <strong>{profile.houseCode} · {profile.headName}</strong>
-            <span>Blok {profile.blockCode} · Nomor {profile.houseNumber} · Username: {profile.username}</span>
+            <span>Akun: {profile.fullName} · Blok {profile.blockCode} No. {profile.houseNumber} · Username: {profile.username}</span>
             <span className="house-occupancy-label">
               {profile.occupancyStatus === 'RENTED'
                 ? `Dikontrakan${profile.ownerPhone ? ` · Pemilik: ${profile.ownerPhone}` : ''}`
                 : profile.occupancyStatus === 'VACANT'
                   ? 'Belum dihuni'
                   : 'Dihuni pemilik'}
-              {profile.phoneMasked ? ` · Telp/WA: ${profile.phoneMasked} (Terenkripsi)` : ''}
+              {(profile.phone || profile.phoneMasked) ? ` · Telp/WA: ${profile.phone ?? `${profile.phoneMasked} (Terenkripsi)`}` : ''}
             </span>
           </div>
           <div className="arrears-count">
@@ -535,89 +562,109 @@ function WargaProfileContent({
         )}
       </Card>
 
-      <Card>
-        <SectionTitle
-          title="Perbarui data profil"
-          description="Sesuaikan nama akun, kepala warga, status hunian, atau nomor kontak."
-        />
-        {profileError && <Notice>{profileError}</Notice>}
-        {profileSuccess && <Notice variant="success">{profileSuccess}</Notice>}
-        <form className="form-grid" onSubmit={submitProfile}>
-          <label className="field">
-            <span>Username login</span>
-            <input value={profile.username} readOnly />
-          </label>
-          <label className="field">
-            <span>Kode rumah</span>
-            <input value={profile.houseCode} readOnly />
-          </label>
-          <label className="field">
-            <span>Nama lengkap akun</span>
-            <input
-              maxLength={120}
-              value={fullName}
-              onChange={(event) => setFullName(event.target.value)}
-              disabled={!canUpdate || savingProfile}
-              required
-            />
-          </label>
-          <label className="field">
-            <span>Nama kepala warga</span>
-            <input
-              maxLength={120}
-              value={headName}
-              onChange={(event) => setHeadName(event.target.value)}
-              disabled={!canUpdate || savingProfile}
-              required
-            />
-          </label>
-          <label className="field">
-            <span>Status hunian</span>
-            <select
-              value={occupancyStatus}
-              onChange={(event) => setOccupancyStatus(event.target.value as HouseOccupancyStatus)}
-              disabled={!canUpdate || savingProfile}
-            >
-              <option value="OWNER_OCCUPIED">Dihuni pemilik</option>
-              <option value="RENTED">Dikontrakan</option>
-              <option value="VACANT">Belum dihuni</option>
-            </select>
-          </label>
-          {occupancyStatus === 'RENTED' && (
+      <dialog className="rbac-modal" ref={editProfileDialog} aria-labelledby="warga-profile-modal-title">
+        <div className="rbac-modal-head">
+          <div>
+            <h2 id="warga-profile-modal-title">Perbarui data profil</h2>
+            <p>Sesuaikan nama akun, kepala warga, status hunian, atau nomor kontak.</p>
+          </div>
+          <button
+            className="rbac-modal-close"
+            type="button"
+            aria-label="Tutup form perbarui profil"
+            onClick={() => editProfileDialog.current?.close()}
+            disabled={savingProfile}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <form className="rbac-create-form" onSubmit={(event) => void submitProfile(event)}>
+          {profileError && <Notice>{profileError}</Notice>}
+          <div className="rbac-create-grid">
+            <label className="field">
+              <span>Username login</span>
+              <input value={profile.username} readOnly />
+            </label>
+            <label className="field">
+              <span>Kode rumah</span>
+              <input value={profile.houseCode} readOnly />
+            </label>
             <label className="field field-wide">
-              <span>Nomor HP / WhatsApp Pemilik Rumah <small>(Yang Mengontrakkan)</small> <span style={{ color: '#dc2626' }}>*</span></span>
+              <span>Nama lengkap akun</span>
+              <input
+                maxLength={120}
+                value={fullName}
+                onChange={(event) => setFullName(event.target.value)}
+                disabled={!canUpdate || savingProfile}
+                required
+              />
+            </label>
+            <label className="field field-wide">
+              <span>Nama kepala warga</span>
+              <input
+                maxLength={120}
+                value={headName}
+                onChange={(event) => setHeadName(event.target.value)}
+                disabled={!canUpdate || savingProfile}
+                required
+              />
+            </label>
+            <label className="field">
+              <span>Status hunian</span>
+              <select
+                value={occupancyStatus}
+                onChange={(event) => setOccupancyStatus(event.target.value as HouseOccupancyStatus)}
+                disabled={!canUpdate || savingProfile}
+              >
+                <option value="OWNER_OCCUPIED">Dihuni pemilik</option>
+                <option value="RENTED">Dikontrakan</option>
+                <option value="VACANT">Belum dihuni</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>No. WhatsApp / Telepon <small>(opsional)</small></span>
               <input
                 type="tel"
                 maxLength={30}
                 placeholder="Contoh: 0812-3456-7890"
-                value={ownerPhone}
-                onChange={(event) => setOwnerPhone(event.target.value)}
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
                 disabled={!canUpdate || savingProfile}
-                required={occupancyStatus === 'RENTED'}
               />
-              <small>Diisi oleh penghuni / yang punya rumah agar pengurus lingkungan dapat menghubungi pemilik unit.</small>
             </label>
-          )}
-          <label className="field">
-            <span>No. WhatsApp / Telepon <small>(opsional)</small></span>
-            <input
-              type="tel"
-              maxLength={30}
-              placeholder="Contoh: 0812-3456-7890"
-              value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-              disabled={!canUpdate || savingProfile}
-            />
-          </label>
-          {canUpdate && (
-            <div className="field-wide form-actions">
-              <Button type="submit" disabled={savingProfile}>
-                {savingProfile ? 'Menyimpan...' : 'Simpan profil'}
-              </Button>
-            </div>
-          )}
+            {occupancyStatus === 'RENTED' && (
+              <label className="field field-wide">
+                <span>Nomor HP / WhatsApp Pemilik Rumah <small>(Yang Mengontrakkan)</small> <span style={{ color: '#dc2626' }}>*</span></span>
+                <input
+                  type="tel"
+                  maxLength={30}
+                  placeholder="Contoh: 0812-3456-7890"
+                  value={ownerPhone}
+                  onChange={(event) => setOwnerPhone(event.target.value)}
+                  disabled={!canUpdate || savingProfile}
+                  required={occupancyStatus === 'RENTED'}
+                />
+                <small>Diisi oleh penghuni / yang punya rumah agar pengurus lingkungan dapat menghubungi pemilik unit.</small>
+              </label>
+            )}
+          </div>
+          <div className="form-actions">
+            <Button className="button-small" type="submit" disabled={!canUpdate || savingProfile}>
+              {savingProfile ? 'Menyimpan...' : 'Simpan profil'}
+            </Button>
+            <Button
+              className="button-small"
+              type="button"
+              variant="secondary"
+              onClick={() => editProfileDialog.current?.close()}
+              disabled={savingProfile}
+            >
+              Batal
+            </Button>
+          </div>
         </form>
-      </Card>
+      </dialog>
 
       <Card>
         <SectionTitle
